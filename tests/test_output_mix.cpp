@@ -1,5 +1,6 @@
 #include "domain/audio_format.h"
 #include "domain/output_mix.h"
+#include "domain/splice.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -195,4 +196,48 @@ TEST_CASE("埋めた分は FillResult に出る", "[output]") {
     CHECK(assemble_output(output, constant(CHUNK, 100), CHUNK, pad).padded_frames == 0);
     CHECK(assemble_output(output, constant(100, 100), CHUNK, pad).padded_frames == CHUNK - 100);
     CHECK(assemble_output(output, {}, CHUNK, pad).padded_frames == CHUNK);
+}
+
+// 補正で 1 フレームだけ多く消費するのが一番よくある形。ここを 1 フレームの
+// 混合で済ませると、乗り移り先へ渡り切らないまま次のチャンクへ入って段差が残る。
+
+TEST_CASE("1 フレーム多く消費してもクロスフェードは 1 フレームで終わらない", "[output]") {
+    auto output = zeroed_output();
+    PaddingState pad;
+
+    // 傾いた波(サンプル値 = フレーム番号 * 10)。段差が数値で見える。
+    std::vector<std::int16_t> popped;
+    for (int f = 0; f < CHUNK + 1; ++f)
+        for (int ch = 0; ch < CHANNELS; ++ch)
+            popped.push_back(static_cast<std::int16_t>(f * 10));
+
+    assemble_output(output, popped, CHUNK, pad);
+
+    // 末尾は「1 フレーム先へ進んだ並び」へ寄っているはず(= 素通しより大きい)。
+    CHECK(output[(CHUNK - 1) * CHANNELS] > (CHUNK - 1) * 10);
+
+    // 乗り移りが 1 フレームで終わっていないこと。SPLICE_FADE_FRAMES 手前は
+    // まだ素通し、その後は徐々に持ち上がる。
+    CHECK(output[(CHUNK - SPLICE_FADE_FRAMES - 1) * CHANNELS] == (CHUNK - SPLICE_FADE_FRAMES - 1) * 10);
+    CHECK(output[(CHUNK - SPLICE_FADE_FRAMES) * CHANNELS] > (CHUNK - SPLICE_FADE_FRAMES) * 10);
+}
+
+TEST_CASE("捨てる量が多くても乗り移り先は捨てた分だけ先", "[output]") {
+    auto output = zeroed_output();
+    PaddingState pad;
+
+    // 前半 CHUNK は 1000、捨てる 100 フレームのうち先頭 50 は 0、残りは 4000。
+    // 乗り移るべきなのは「次のチャンクへ繋がる並び」= popped の末尾側 4000。
+    std::vector<std::int16_t> popped = constant(CHUNK, 1000);
+    auto gap = constant(50, 0);
+    auto tail = constant(50, 4000);
+    popped.insert(popped.end(), gap.begin(), gap.end());
+    popped.insert(popped.end(), tail.begin(), tail.end());
+
+    assemble_output(output, popped, CHUNK, pad);
+
+    // extra=100 なので乗り移り先は popped[CHUNK - fade + 100 ...] = 4000 側。
+    // 0 の谷(popped[CHUNK..CHUNK+50))を拾っていたら 1000 より小さくなる。
+    CHECK(output[(CHUNK - 1) * CHANNELS] > 1000);
+    CHECK(output[(CHUNK - 1) * CHANNELS] < 4000);
 }

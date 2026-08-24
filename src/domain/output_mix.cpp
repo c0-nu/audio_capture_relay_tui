@@ -25,7 +25,6 @@ namespace acr {
         FillResult result;
         if (chunk_frames <= 0) return result;
 
-        const std::size_t chunk_samples = static_cast<std::size_t>(chunk_frames) * CHANNELS;
         const std::size_t popped_frames = popped.size() / CHANNELS;
         const std::size_t real_frames = std::min(popped_frames, static_cast<std::size_t>(chunk_frames));
 
@@ -34,15 +33,21 @@ namespace acr {
         }
 
         if (popped_frames > static_cast<std::size_t>(chunk_frames)) {
-            // ドリフト補正で多めに消費した分。そのまま切ると段差になるので、
-            // 捨てる側の頭を出力の末尾へ溶かし込む。フェード長は「余分に持って
-            // いるフレーム数」を超えられない(超えると popped の外を読む)。
+            // ドリフト補正で多めに消費した分。次のチャンクは popped の続き
+            // (= extra_frames だけ先へ進んだ並び)から始まるので、出力の末尾を
+            // その並びへ乗り移らせておかないと境目に段差が残る。
+            //
+            // 溶かし込む先は popped[f + extra_frames]。フェード長を
+            // extra_frames で頭打ちにしないこと。補正はたいてい 1 フレームなので、
+            // 頭打ちにすると 1 フレームだけの混合 = 実質ハードスプライスになる。
+            // 読む範囲は popped[chunk_frames - 1 + extra_frames] までで収まるから、
+            // フェードはチャンク長まで伸ばして構わない。
             const std::size_t extra_frames = popped_frames - static_cast<std::size_t>(chunk_frames);
-            const std::size_t fade = std::min<std::size_t>({static_cast<std::size_t>(SPLICE_FADE_FRAMES),
-                static_cast<std::size_t>(chunk_frames),
-                                                           extra_frames});
-            crossfade_tail(output.data() + (static_cast<std::size_t>(chunk_frames) - fade) * CHANNELS,
-                           popped.data() + chunk_samples,
+            const std::size_t fade = std::min<std::size_t>(static_cast<std::size_t>(SPLICE_FADE_FRAMES),
+                                                           static_cast<std::size_t>(chunk_frames));
+            const std::size_t fade_start = static_cast<std::size_t>(chunk_frames) - fade;
+            crossfade_tail(output.data() + fade_start * CHANNELS,
+                           popped.data() + (fade_start + extra_frames) * CHANNELS,
                            fade,
                            CHANNELS);
         }
