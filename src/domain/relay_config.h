@@ -4,6 +4,14 @@
 
 namespace acr {
 
+    // --low-latency の中身。チャンクを詰めると、こちらが持つ予備
+    // (min_ring = 2 チャンク)とサーバ側に持たせる分(4 チャンク)が両方縮む。
+    // 実測(PipeWire, quantum 1024): 既定 約130ms -> この設定で 60ms(90 秒で underrun 0)。
+    // 実測の下限は約 42ms だが、目標をそこぎりぎり(40ms)に置くと薄くて滑ったので
+    // (60 秒で 1 回)、少し余裕を取ってある。
+    constexpr int LOW_LATENCY_CHUNK_MS = 5;
+    constexpr int LOW_LATENCY_TARGET_MS = 60;
+
     // 中継の動作パラメータ。CLI の解析結果から作られ、以降は読み取り専用。
     struct RelayConfig {
         int latency_ms = DEFAULT_LATENCY_MS;
