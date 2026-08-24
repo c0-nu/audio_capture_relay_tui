@@ -16,6 +16,7 @@ namespace acr {
         WaveformStyle waveform_style = WaveformStyle::Envelope; // --waveform-style
         bool interactive_select = false;  // --select
         std::string source_arg;           // --source の値
+        std::string sink_arg;             // --sink の値(空なら既定の sink)
         float volume = 1.0f;              // --volume(0.0〜4.0)
         RelayConfig relay;                // --latency-ms / --chunk-ms
     };

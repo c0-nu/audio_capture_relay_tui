@@ -21,8 +21,8 @@ namespace acr {
         };
 
         struct PopResult {
-            std::vector<int16_t> samples; // 実際に取れた分(要求より少ないことがある)
-            bool underrun = false;        // 要求フレーム数に届かなかった
+            std::size_t frames = 0; // 実際に取れたフレーム数(要求より少ないことがある)
+            bool underrun = false;  // 要求フレーム数に届かなかった
         };
 
         // samples を末尾に積む。max_frames を超えたら古い方を落とす。
@@ -30,8 +30,9 @@ namespace acr {
         // 新しい先頭にハードスプライスが残らないようにする。
         PushResult push(const std::vector<int16_t>& samples, std::size_t max_frames);
 
-        // 先頭から最大 frames フレームを取り出す。
-        PopResult pop(std::size_t frames);
+        // 先頭から最大 frames フレームを out へ取り出す。
+        // out は毎回 resize して使い回す(1 チャンクごとに確保し直さないため)。
+        PopResult pop(std::size_t frames, std::vector<int16_t>& out);
 
         // max_frames を超えている分を古い方から落とす(push と同じくクロスフェードする)。
         // 起動時に貯まりすぎた分を捨てて目標水位から始めるために使う。

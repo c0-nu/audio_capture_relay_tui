@@ -6,7 +6,7 @@
 namespace acr {
 
     // capture source 1 件。PulseAudio の型はここに漏らさない。
-    struct SourceInfo {
+    struct DeviceInfo {
         std::uint32_t index = 0;
         std::string name;
         std::string description;

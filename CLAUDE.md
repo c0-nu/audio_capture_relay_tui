@@ -47,20 +47,22 @@ src/
     wave_history.{h,cpp}    波形表示用の履歴。min/max のエンベロープで持つ(ロックは内部)
     drift_control.{h,cpp}   合計レイテンシから消費フレーム数を決める。ドリフト補正の中心
     level_meter.{h,cpp}     1 チャンクの RMS / ピーク / クリップ率 / モノラルミックス
+    output_mix.{h,cpp}      1 チャンク分の出力の組み立て(枯れたときの埋め方・音量)
     splice.{h,cpp}          つなぎ替え箇所のクロスフェード
     waveform.{h,cpp}        点字波形の生成、メーターバーの文字列化
-    source_info.h           capture source 1 件のデータ。PulseAudio 型を漏らさない
-    source_match.{h,cpp}    --source の引数から source を選ぶ判定(出力はしない)
-    text_util.{h,cpp}       UTF-8 を壊さない切り詰め、小文字化、数値判定
+    device_info.h           source / sink 1 件のデータ。PulseAudio 型を漏らさない
+    device_match.{h,cpp}    --source / --sink の引数から選ぶ判定(出力はしない)
+    error_log.{h,cpp}       直近のエラーと件数、失敗が続いた時間の判定
+    text_util.{h,cpp}       UTF-8 を壊さない切り詰め、小文字化、数値の解釈
   adapters/                 副作用。外部ライブラリはここでだけ触る
-    pulse_source_lister.*   source 一覧の取得(libpulse の mainloop / context)
+    pulse_device_lister.*   source / sink 一覧の取得(libpulse の mainloop / context)
     pulse_capture.*         capture スレッドの本体(pa_simple_read)
     pulse_playback.*        playback スレッドの本体(pa_simple_write)
     tui_ncurses.*           全画面 TUI とキー入力(ncurses)
     plain_status.*          --no-tui の 1 行ステータス(標準出力)
   app/                      CLI と組み立ての補助
     options.{h,cpp}         引数解析と usage
-    source_cli.{h,cpp}      source 一覧の表示・対話選択・エラーメッセージ
+    device_cli.{h,cpp}      source / sink 一覧の表示・対話選択・エラーメッセージ
     signal_handling.{h,cpp} SIGINT / SIGTERM -> SharedState::request_stop
 tests/                      domain/ のテスト(Catch2 v3)。本体とは独立にビルドする
 ```
@@ -163,6 +165,19 @@ underrun が並ぶ(`--volume 0` でも観測できる)。
 `drift` が 0 付近に収束し、`underruns` が起動直後以外で増えなければ OK。
 起動を数回繰り返して underruns が 0〜2 に収まることも見ること(実測でばらつく)。
 
+### 枯れたときの埋め方
+
+リングが枯れたら最後のサンプルで埋めるが、**保持しっぱなしにしない**。
+DC が乗ったままだと復帰の瞬間に「ブツッ」と鳴るので、5ms(`PAD_FADE_FRAMES`)で
+0 へ落とし、実音声が戻ったら 1ms(`PAD_RECOVER_FRAMES`)で立ち上げる。
+組み立ては `domain/output_mix.h` の `assemble_output`(純粋、テスト済み)。
+
+### ホットパスの確保
+
+1 チャンク(既定 20ms)ごとに回る経路では、毎回ヒープを取らない。
+`PcmRing::pop` と `analyze_chunk` は呼び出し側のバッファへ書く形にしてある。
+戻り値で `std::vector` を返す形に戻さないこと。
+
 ### 音声フォーマット
 
 S16LE / 48000Hz / 2ch 固定(`domain/audio_format.h`)。可変にする予定は今のところ無い。
@@ -173,8 +188,11 @@ S16LE / 48000Hz / 2ch 固定(`domain/audio_format.h`)。可変にする予定は
 
 - `pa_*` / ncurses の呼び出しは `adapters/` の中だけ。`domain/` の関数シグネチャに
   ライブラリの型を出さない。
-- capture / playback のエラーは `std::cerr` に出しているが、TUI 表示中は画面が乱れる。
-  直すならエラーを `SharedState` に積んで TUI 側で描く形にする(未着手)。
+- **エラーを `std::cerr` に直接書かないこと。** TUI 表示中は画面が壊れる。
+  `st.errors.report(...)`(`ErrorLog`)に積み、出すのは表示層の仕事。
+  続行不能なときは `st.abort(...)` を使う(終了コードが 1 になる)。
+- capture / playback は 3 秒失敗し続けたら諦めて終了する(`FailureWindow`)。
+  source が消えたまま永久にリトライしない。
 - `.monitor` source を同じ出力デバイスへ流し直すとループする。README の pavucontrol の
   注意書きを参照。
 
@@ -194,14 +212,10 @@ S16LE / 48000Hz / 2ch 固定(`domain/audio_format.h`)。可変にする予定は
 
 ## 未決事項(勝手に決めない)
 
-- `--volume` / `--latency-ms` / `--chunk-ms` の不正な値(`--volume abc` など)で
-  `std::stof` / `std::stoi` が例外を投げて異常終了する。現状の挙動をそのまま維持している。
-  エラーメッセージを出して終了する形に変えるかは未決。
-- エラー表示を TUI に統合するか(現状 `std::cerr` に出すので画面が乱れる)。
-- underrun 時のパディングが最後のサンプルを保持し続ける(DC が乗る)。
-  数 ms でゼロへフェードする形に変えるか。
-- 出力先 sink を選ぶ `--sink` を足すか(いまは `pavucontrol` 頼み)。
-- capture / playback のエラーが恒久化しても無限リトライする。打ち切るか再接続するか。
+- 出力先 sink は起動時にしか選べない。実行中に切り替えられるようにするか。
+- 打ち切り(3 秒)のあと、再接続を試みるようにするか。いまは終了するだけ。
+- `--source` / `--sink` は起動時の一覧に対する番号なので、デバイスの抜き差しで
+  番号が変わる。名前指定を推奨する旨をどこまで README に書くか。
 
 ---
 

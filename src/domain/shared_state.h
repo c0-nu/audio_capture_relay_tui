@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/audio_format.h"
+#include "domain/error_log.h"
 #include "domain/pcm_ring.h"
 #include "domain/wave_history.h"
 #include "domain/waveform.h"
@@ -18,8 +19,17 @@ namespace acr {
         // 実行中フラグ。false になったら全スレッドが自分で抜ける。
         std::atomic<bool> running{true};
 
+        // 続行不能で止めたか。ユーザーが q / Ctrl+C で止めた場合は false のまま。
+        std::atomic<bool> aborted{false};
+
         bool is_running() const { return running.load(); }
         void request_stop() { running.store(false); }
+
+        void abort(const std::string& message) {
+            errors.report(message);
+            aborted.store(true);
+            running.store(false);
+        }
 
         // 波形表示用の履歴(モノラルミックス)。
         WaveHistory wave{WAVE_BUCKET_SAMPLES, WAVE_HISTORY_BUCKETS};
@@ -47,12 +57,18 @@ namespace acr {
         std::atomic<float> peak_r{0.0f};
         std::atomic<float> clip_ratio{0.0f};
         std::atomic<std::uint64_t> frames_captured{0};
-        std::atomic<std::uint64_t> errors{0};
+
+        // 直近のエラー。出力は表示層に任せる(TUI 中に stderr へ書くと画面が壊れる)。
+        ErrorLog errors;
 
         // 起動時に一度だけ書き、以降は読むだけ。
         std::string source_name;
         std::string source_description;
         bool source_is_monitor = false;
+
+        // 出力先。空なら PulseAudio の既定 sink に任せる。
+        std::string sink_name;
+        std::string sink_description;
     };
 
 } // namespace acr

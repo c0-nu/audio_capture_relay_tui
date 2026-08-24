@@ -1,7 +1,8 @@
 #include "adapters/pulse_playback.h"
 
 #include "domain/drift_control.h"
-#include "domain/splice.h"
+#include "domain/error_log.h"
+#include "domain/output_mix.h"
 
 #include <pulse/error.h>
 #include <pulse/simple.h>
@@ -9,7 +10,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <iostream>
 #include <thread>
 #include <vector>
 
@@ -20,69 +20,8 @@ namespace acr {
         // プライミングで流す無音の上限(安全弁)。実測では 40 チャンク前後で詰まる。
         constexpr int PREFILL_MAX_CHUNKS = 150;
 
-        // popped の先頭 chunk_frames を output へ。余分に取れていた分は、
-        // 捨て際をクロスフェードしてから捨てる(スプライスのクリック対策)。
-        void fill_from_popped(std::vector<int16_t>& output,
-                              const std::vector<int16_t>& popped,
-                              int chunk_frames,
-                              int16_t& last_frame_l,
-                              int16_t& last_frame_r) {
-            const std::size_t chunk_samples = static_cast<std::size_t>(chunk_frames) * CHANNELS;
-            const std::size_t popped_frames = popped.size() / CHANNELS;
-
-            if (popped_frames >= static_cast<std::size_t>(chunk_frames)) {
-                // Normal case (or catch-up after starving): use the first
-                // chunk_frames worth of what we popped.
-                std::copy(popped.begin(), popped.begin() + static_cast<std::ptrdiff_t>(chunk_samples), output.begin());
-
-                if (popped_frames > static_cast<std::size_t>(chunk_frames)) {
-                    // We deliberately over-consumed to drain excess buffer.
-                    // Crossfade the boundary so discarding the extra frames
-                    // doesn't produce an audible click/splice. The fade length
-                    // must not exceed how many "extra" (dropped) frames we
-                    // actually have on hand, or we'd read past the end of
-                    // `popped`.
-                    std::size_t extra_frames = popped_frames - static_cast<std::size_t>(chunk_frames);
-                    std::size_t fade = std::min<std::size_t>({static_cast<std::size_t>(SPLICE_FADE_FRAMES),
-                        static_cast<std::size_t>(chunk_frames),
-                                                             extra_frames});
-                    crossfade_tail(output.data() + (static_cast<std::size_t>(chunk_frames) - fade) * CHANNELS,
-                                   popped.data() + chunk_samples,
-                                   fade,
-                                   CHANNELS);
-                }
-            } else {
-                // Buffer is starving: fewer frames were available than a full
-                // chunk. Copy what we have and pad the remainder by holding the
-                // last real sample. Held for only a handful of samples this is
-                // inaudible, and it buys the capture side time to catch up
-                // instead of producing a hard dropout.
-                if (!popped.empty()) std::copy(popped.begin(), popped.end(), output.begin());
-                for (std::size_t f = popped_frames; f < static_cast<std::size_t>(chunk_frames); ++f) {
-                    output[f * CHANNELS + 0] = last_frame_l;
-                    output[f * CHANNELS + 1] = last_frame_r;
-                }
-            }
-
-            if (chunk_frames > 0) {
-                last_frame_l = output[static_cast<std::size_t>(chunk_frames - 1) * CHANNELS + 0];
-                last_frame_r = output[static_cast<std::size_t>(chunk_frames - 1) * CHANNELS + 1];
-            }
-        }
-
-        void apply_volume(std::vector<int16_t>& output, bool paused, bool muted, float volume) {
-            if (paused) {
-                std::fill(output.begin(), output.end(), 0);
-                return;
-            }
-
-            float vol = muted ? 0.0f : volume;
-            for (auto& s : output) {
-                float v = static_cast<float>(s) * vol;
-                v = std::clamp(v, -32768.0f, 32767.0f);
-                s = static_cast<int16_t>(std::lround(v));
-            }
-        }
+        // capture 側と同じく、失敗が続いたら打ち切る。
+        constexpr auto FAILURE_LIMIT = std::chrono::seconds(3);
 
     } // namespace
 
@@ -114,7 +53,7 @@ namespace acr {
             nullptr,
             "AudioCaptureRelay",
             PA_STREAM_PLAYBACK,
-            nullptr,
+            st.sink_name.empty() ? nullptr : st.sink_name.c_str(),
             "relay playback",
             &ss,
             nullptr,
@@ -123,13 +62,14 @@ namespace acr {
         );
 
         if (!play) {
-            std::cerr << "pa_simple_new(playback) failed: " << pa_strerror(error) << "\n";
-            st.request_stop();
+            st.abort(std::string("pa_simple_new(playback) failed: ") + pa_strerror(error));
             return;
         }
 
         std::vector<int16_t> output(static_cast<std::size_t>(chunk_frames) * CHANNELS);
-        int16_t last_frame_l = 0, last_frame_r = 0; // for sample-and-hold padding on underrun
+        std::vector<int16_t> popped_buffer; // 毎チャンク確保し直さないよう使い回す
+        popped_buffer.reserve(static_cast<std::size_t>(chunk_frames + 64) * CHANNELS);
+        PaddingState pad; // 枯れたときの埋め方(チャンクをまたいで持ち越す)
 
         // サーバ側キューの滞留。取得に失敗したら直前の値を使う(毎チャンク聞くので
         // 1 回落ちても次で戻る。ここで stderr に吐くと TUI が壊れる)。
@@ -178,6 +118,8 @@ namespace acr {
         }
         st.ring.trim(static_cast<std::size_t>(ring_start_frames));
 
+        FailureWindow failures(FAILURE_LIMIT);
+
         DriftController drift(target_frames, chunk_frames, cfg.chunk_ms, cfg.min_ring_frames(),
                               static_cast<std::int64_t>(st.ring.frames_buffered()) + query_downstream());
 
@@ -188,18 +130,22 @@ namespace acr {
             st.reserve_hold.store(decision.reserve_hold);
             st.drift_ms.store(decision.drift_ms);
 
-            auto popped = st.ring.pop(static_cast<std::size_t>(decision.consume_frames));
+            auto popped = st.ring.pop(static_cast<std::size_t>(decision.consume_frames), popped_buffer);
             if (popped.underrun) st.underruns.fetch_add(1);
 
-            fill_from_popped(output, popped.samples, chunk_frames, last_frame_l, last_frame_r);
+            assemble_output(output, popped_buffer, chunk_frames, pad);
             apply_volume(output, st.paused.load(), st.muted.load(), st.volume.load());
 
             if (pa_simple_write(play, output.data(), output.size() * sizeof(int16_t), &error) < 0) {
-                std::cerr << "pa_simple_write failed: " << pa_strerror(error) << "\n";
-                st.errors.fetch_add(1);
+                st.errors.report(std::string("pa_simple_write failed: ") + pa_strerror(error));
+                if (failures.record_failure(std::chrono::steady_clock::now())) {
+                    st.abort("playback failed continuously, giving up");
+                    break;
+                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
+            failures.record_success();
         }
 
         pa_simple_drain(play, &error);

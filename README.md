@@ -57,6 +57,15 @@ source一覧:
 ./build/audio_capture_relay --select
 ```
 
+出力先sinkを選ぶ(省略時は既定のsink):
+
+```bash
+./build/audio_capture_relay --sink 1
+./build/audio_capture_relay --sink hdmi
+```
+
+`--list` はcapture sourceと出力sinkの両方を表示します。
+
 TUIなし:
 
 ```bash
@@ -107,7 +116,7 @@ TUI の `Latency:` 行に内訳(`ring` = 自前のバッファ、`out` = サー�
 
 `.monitor` source は「出力デバイスへ流れている音」をcaptureします。
 
-同じ出力デバイスへ再出力すると、AudioCaptureRelay自身の音を再度拾ってループする場合があります。その場合は `pavucontrol` で AudioCaptureRelay の出力先を別sinkに変更してください。
+同じ出力デバイスへ再出力すると、AudioCaptureRelay自身の音を再度拾ってループする場合があります。その場合は `--sink` で別のsinkを指定するか、`pavucontrol` で AudioCaptureRelay の出力先を変更してください。
 
 null sinkを作る例:
 

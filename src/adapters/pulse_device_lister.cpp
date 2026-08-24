@@ -1,6 +1,6 @@
-#include "adapters/pulse_source_lister.h"
+#include "adapters/pulse_device_lister.h"
 
-#include "domain/source_match.h"
+#include "domain/device_match.h"
 #include "domain/text_util.h"
 
 #include <pulse/pulseaudio.h>
@@ -93,22 +93,35 @@ namespace acr {
     } // namespace
 
     // コールバックから書き戻す先。C の userdata に渡すためだけの入れ物。
-    struct PulseSourceLister::Impl {
-        std::vector<SourceInfo>* sources = nullptr;
+    struct PulseDeviceLister::Impl {
+        std::vector<DeviceInfo>* sources = nullptr;
+        std::vector<DeviceInfo>* sinks = nullptr;
         std::string* default_source = nullptr;
+        std::string* default_sink = nullptr;
 
         static void server_info_cb(pa_context*, const pa_server_info* info, void* userdata) {
             auto* self = static_cast<Impl*>(userdata);
-            if (info && info->default_source_name) {
-                *self->default_source = info->default_source_name;
-            }
+            if (!info) return;
+            if (info->default_source_name) *self->default_source = info->default_source_name;
+            if (info->default_sink_name) *self->default_sink = info->default_sink_name;
+        }
+
+        static void sink_info_cb(pa_context*, const pa_sink_info* info, int eol, void* userdata) {
+            if (eol > 0 || !info) return;
+            auto* self = static_cast<Impl*>(userdata);
+
+            DeviceInfo s;
+            s.index = info->index;
+            s.name = safe(info->name);
+            s.description = safe(info->description);
+            self->sinks->push_back(std::move(s));
         }
 
         static void source_info_cb(pa_context*, const pa_source_info* info, int eol, void* userdata) {
             if (eol > 0 || !info) return;
             auto* self = static_cast<Impl*>(userdata);
 
-            SourceInfo s;
+            DeviceInfo s;
             s.index = info->index;
             s.name = safe(info->name);
             s.description = safe(info->description);
@@ -118,28 +131,34 @@ namespace acr {
         }
     };
 
-    bool PulseSourceLister::query(std::string& error_message) {
+    bool PulseDeviceLister::query(std::string& error_message) {
         sources_.clear();
+        sinks_.clear();
         default_source_.clear();
+        default_sink_.clear();
 
         QuerySession session;
         if (!session.connect(error_message)) return false;
 
-        Impl sink{&sources_, &default_source_};
+        Impl out{&sources_, &sinks_, &default_source_, &default_sink_};
 
-        if (!session.wait_operation(pa_context_get_server_info(session.context(), &Impl::server_info_cb, &sink), error_message)) {
+        if (!session.wait_operation(pa_context_get_server_info(session.context(), &Impl::server_info_cb, &out), error_message)) {
             return false;
         }
 
-        if (!session.wait_operation(pa_context_get_source_info_list(session.context(), &Impl::source_info_cb, &sink), error_message)) {
+        if (!session.wait_operation(pa_context_get_source_info_list(session.context(), &Impl::source_info_cb, &out), error_message)) {
             return false;
         }
 
-        for (auto& s : sources_) {
-            s.is_default = (s.name == default_source_);
+        if (!session.wait_operation(pa_context_get_sink_info_list(session.context(), &Impl::sink_info_cb, &out), error_message)) {
+            return false;
         }
 
-        sort_sources(sources_);
+        for (auto& s : sources_) s.is_default = (s.name == default_source_);
+        for (auto& s : sinks_) s.is_default = (s.name == default_sink_);
+
+        sort_devices(sources_);
+        sort_devices(sinks_);
         return true;
     }
 

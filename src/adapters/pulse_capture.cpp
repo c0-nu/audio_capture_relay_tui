@@ -1,12 +1,12 @@
 #include "adapters/pulse_capture.h"
 
+#include "domain/error_log.h"
 #include "domain/level_meter.h"
 
 #include <pulse/error.h>
 #include <pulse/simple.h>
 
 #include <chrono>
-#include <iostream>
 #include <thread>
 #include <vector>
 
@@ -20,6 +20,10 @@ namespace acr {
         // during normal operation, this is just a backstop. It's crossfaded on
         // the off chance it does fire, so it doesn't itself produce a click.
         constexpr std::size_t MAX_RING_FRAMES = static_cast<std::size_t>(SAMPLE_RATE) * 3; // 3s hard cap
+
+        // これだけ失敗し続けたら復帰の見込みなしとみて打ち切る(source が
+        // 消えたまま 10ms ごとに永遠にリトライしない)。
+        constexpr auto FAILURE_LIMIT = std::chrono::seconds(3);
 
     } // namespace
 
@@ -52,25 +56,30 @@ namespace acr {
         );
 
         if (!rec) {
-            std::cerr << "pa_simple_new(record) failed: " << pa_strerror(error) << "\n";
-            st.request_stop();
+            st.abort(std::string("pa_simple_new(record) failed: ") + pa_strerror(error));
             return;
         }
 
         std::vector<int16_t> input(static_cast<std::size_t>(chunk_frames) * CHANNELS);
+        ChunkAnalysis analysis; // 毎チャンク作り直さず使い回す
+        FailureWindow failures(FAILURE_LIMIT);
 
         while (st.is_running()) {
             if (pa_simple_read(rec, input.data(), input.size() * sizeof(int16_t), &error) < 0) {
-                std::cerr << "pa_simple_read failed: " << pa_strerror(error) << "\n";
-                st.errors.fetch_add(1);
+                st.errors.report(std::string("pa_simple_read failed: ") + pa_strerror(error));
+                if (failures.record_failure(std::chrono::steady_clock::now())) {
+                    st.abort("capture failed continuously, giving up");
+                    break;
+                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
+            failures.record_success();
 
             float vol = st.muted.load() ? 0.0f : st.volume.load();
             float analysis_vol = st.paused.load() ? 0.0f : vol;
 
-            ChunkAnalysis analysis = analyze_chunk(input, static_cast<std::size_t>(chunk_frames), analysis_vol);
+            analyze_chunk(input, static_cast<std::size_t>(chunk_frames), analysis_vol, analysis);
             st.rms_l.store(analysis.rms_l);
             st.rms_r.store(analysis.rms_r);
             st.peak_l.store(analysis.peak_l);

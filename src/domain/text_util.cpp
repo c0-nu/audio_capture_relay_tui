@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 
 namespace acr {
 
@@ -44,6 +45,29 @@ namespace acr {
         if (static_cast<int>(s.size()) <= max_len) return s;
         if (max_len <= 3) return s.substr(0, utf8_prefix_len(s, max_len));
         return s.substr(0, utf8_prefix_len(s, max_len - 3)) + "...";
+    }
+
+    std::optional<int> parse_int(const std::string& s) {
+        try {
+            std::size_t pos = 0;
+            int v = std::stoi(s, &pos);
+            if (pos != s.size()) return std::nullopt;
+            return v;
+        } catch (...) {
+            return std::nullopt;
+        }
+    }
+
+    std::optional<float> parse_float(const std::string& s) {
+        try {
+            std::size_t pos = 0;
+            float v = std::stof(s, &pos);
+            if (pos != s.size()) return std::nullopt;
+            if (!std::isfinite(v)) return std::nullopt;
+            return v;
+        } catch (...) {
+            return std::nullopt;
+        }
     }
 
     bool parse_index(const std::string& s, std::size_t& out) {

@@ -1,5 +1,7 @@
 #include "app/options.h"
 
+#include "domain/text_util.h"
+
 #include <algorithm>
 #include <iostream>
 
@@ -14,6 +16,7 @@ namespace acr {
         << "Options:\n"
         << "  --list                 List capture sources.\n"
         << "  --source VALUE          Source index, exact name, or substring. Omit to use default source.\n"
+        << "  --sink VALUE            Output sink index, exact name, or substring. Omit to use default sink.\n"
         << "  --select               Choose source interactively before starting.\n"
         << "  --volume PERCENT       Software output volume. Default: 100.\n"
         << "  --latency-ms MS         Playback buffer target. Default: 120.\n"
@@ -23,6 +26,15 @@ namespace acr {
         << "  --waveform-style STYLE  envelope (default) or line. Switchable at runtime with s.\n"
         << "  --help                 Show this help.\n";
     }
+
+    namespace {
+
+        std::optional<Options> invalid_value(const std::string& name, const std::string& value) {
+            std::cerr << "Invalid value for " << name << ": " << value << "\n";
+            return std::nullopt;
+        }
+
+    } // namespace
 
     std::optional<Options> parse_args(int argc, char** argv) {
         Options opt;
@@ -47,20 +59,30 @@ namespace acr {
                 auto v = need_value(a);
                 if (!v) return std::nullopt;
                 opt.source_arg = *v;
+            } else if (a == "--sink") {
+                auto v = need_value(a);
+                if (!v) return std::nullopt;
+                opt.sink_arg = *v;
             } else if (a == "--select") {
                 opt.interactive_select = true;
             } else if (a == "--volume" || a == "-v") {
                 auto v = need_value(a);
                 if (!v) return std::nullopt;
-                opt.volume = std::clamp(std::stof(*v) / 100.0f, 0.0f, 4.0f);
+                auto percent = parse_float(*v);
+                if (!percent) return invalid_value(a, *v);
+                opt.volume = std::clamp(*percent / 100.0f, 0.0f, 4.0f);
             } else if (a == "--latency-ms") {
                 auto v = need_value(a);
                 if (!v) return std::nullopt;
-                opt.relay.latency_ms = std::clamp(std::stoi(*v), 20, 2000);
+                auto ms = parse_int(*v);
+                if (!ms) return invalid_value(a, *v);
+                opt.relay.latency_ms = std::clamp(*ms, 20, 2000);
             } else if (a == "--chunk-ms") {
                 auto v = need_value(a);
                 if (!v) return std::nullopt;
-                opt.relay.chunk_ms = std::clamp(std::stoi(*v), 5, 200);
+                auto ms = parse_int(*v);
+                if (!ms) return invalid_value(a, *v);
+                opt.relay.chunk_ms = std::clamp(*ms, 5, 200);
             } else if (a == "--no-tui") {
                 opt.tui = false;
             } else if (a == "--no-waveform") {

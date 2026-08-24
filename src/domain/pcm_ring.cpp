@@ -57,16 +57,18 @@ namespace acr {
         return drop_frames;
     }
 
-    PcmRing::PopResult PcmRing::pop(std::size_t frames) {
+    PcmRing::PopResult PcmRing::pop(std::size_t frames, std::vector<int16_t>& out) {
         std::lock_guard<std::mutex> lk(mutex_);
 
         PopResult result;
-        std::size_t available_frames = data_.size() / CHANNELS;
-        std::size_t take_frames = std::min(frames, available_frames);
+        const std::size_t available_frames = data_.size() / CHANNELS;
+        const std::size_t take_frames = std::min(frames, available_frames);
         result.underrun = take_frames < frames;
+        result.frames = take_frames;
 
-        std::size_t take_samples = take_frames * CHANNELS;
-        result.samples.assign(data_.begin(), data_.begin() + static_cast<std::ptrdiff_t>(take_samples));
+        const std::size_t take_samples = take_frames * CHANNELS;
+        out.resize(take_samples); // 確保済み容量があれば使い回される
+        std::copy(data_.begin(), data_.begin() + static_cast<std::ptrdiff_t>(take_samples), out.begin());
         data_.erase(data_.begin(), data_.begin() + static_cast<std::ptrdiff_t>(take_samples));
 
         frames_buffered_.store(data_.size() / CHANNELS);

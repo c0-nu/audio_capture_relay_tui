@@ -17,6 +17,21 @@ namespace {
         return v;
     }
 
+    // 呼び出し側でバッファを使い回す API を、テストでは値で受け取れるように包む。
+    struct Popped {
+        std::vector<int16_t> samples;
+        bool underrun = false;
+        std::size_t frames = 0;
+    };
+
+    Popped take(PcmRing& ring, std::size_t frames) {
+        Popped p;
+        auto r = ring.pop(frames, p.samples);
+        p.underrun = r.underrun;
+        p.frames = r.frames;
+        return p;
+    }
+
 } // namespace
 
 TEST_CASE("push した分だけ溜まり、pop した分だけ減る", "[ring]") {
@@ -26,7 +41,7 @@ TEST_CASE("push した分だけ溜まり、pop した分だけ減る", "[ring]")
     CHECK_FALSE(pushed.trimmed);
     CHECK(ring.frames_buffered() == 100);
 
-    auto popped = ring.pop(40);
+    auto popped = take(ring, 40);
     CHECK_FALSE(popped.underrun);
     CHECK(popped.samples.size() == 40 * CHANNELS);
     CHECK(ring.frames_buffered() == 60);
@@ -36,11 +51,11 @@ TEST_CASE("pop は先頭から順に返す", "[ring]") {
     PcmRing ring;
     ring.push(ramp(10), 10000);
 
-    auto first = ring.pop(4);
+    auto first = take(ring, 4);
     CHECK(first.samples.front() == 0);
     CHECK(first.samples.back() == 3);
 
-    auto second = ring.pop(4);
+    auto second = take(ring, 4);
     CHECK(second.samples.front() == 4);
 }
 
@@ -48,19 +63,19 @@ TEST_CASE("足りなければ取れるだけ返して underrun を立てる", "[
     PcmRing ring;
     ring.push(ramp(5), 10000);
 
-    auto popped = ring.pop(20);
+    auto popped = take(ring, 20);
     CHECK(popped.underrun);
     CHECK(popped.samples.size() == 5 * CHANNELS);
     CHECK(ring.frames_buffered() == 0);
 
-    auto empty = ring.pop(1);
+    auto empty = take(ring, 1);
     CHECK(empty.underrun);
     CHECK(empty.samples.empty());
 }
 
 TEST_CASE("空のリングから 0 フレーム要求しても underrun にしない", "[ring]") {
     PcmRing ring;
-    auto popped = ring.pop(0);
+    auto popped = take(ring, 0);
     CHECK_FALSE(popped.underrun);
     CHECK(popped.samples.empty());
 }
@@ -75,7 +90,7 @@ TEST_CASE("上限を超えたら古い方を落とす", "[ring]") {
     CHECK(ring.frames_buffered() == 1000);
 
     // 残るのは新しい方。末尾はクロスフェードの影響を受けない。
-    auto all = ring.pop(1000);
+    auto all = take(ring, 1000);
     CHECK(all.samples.back() == static_cast<int16_t>(1000 + 999));
 }
 
@@ -89,4 +104,18 @@ TEST_CASE("trim は単独でも呼べて、落とした数を返す", "[ring]") 
     CHECK(ring.trim(200) == 0);   // 既に収まっていれば何もしない
     CHECK(ring.trim(999) == 0);
     CHECK(ring.frames_buffered() == 200);
+}
+
+TEST_CASE("pop は渡したバッファを使い回す", "[ring]") {
+    PcmRing ring;
+    ring.push(ramp(10), 10000);
+
+    std::vector<int16_t> buf(999, 42); // 前回の中身が残っている想定
+    auto r = ring.pop(4, buf);
+
+    CHECK(r.frames == 4);
+    CHECK_FALSE(r.underrun);
+    CHECK(buf.size() == 4 * CHANNELS); // 使う分だけに切り詰まる
+    CHECK(buf.front() == 0);
+    CHECK(buf.back() == 3);
 }

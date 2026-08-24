@@ -15,9 +15,11 @@ find_package(Threads REQUIRED)
 # テストだけ回せる。この性質を壊さないこと。
 set(DOMAIN_SOURCES
     src/domain/drift_control.cpp
+    src/domain/error_log.cpp
     src/domain/level_meter.cpp
+    src/domain/output_mix.cpp
     src/domain/pcm_ring.cpp
-    src/domain/source_match.cpp
+    src/domain/device_match.cpp
     src/domain/splice.cpp
     src/domain/text_util.cpp
     src/domain/wave_history.cpp
@@ -44,7 +46,7 @@ if(ACR_BUILD_APP)
         src/adapters/plain_status.cpp
         src/adapters/pulse_capture.cpp
         src/adapters/pulse_playback.cpp
-        src/adapters/pulse_source_lister.cpp
+        src/adapters/pulse_device_lister.cpp
         src/adapters/tui_ncurses.cpp
     )
 
@@ -52,7 +54,7 @@ if(ACR_BUILD_APP)
     set(APP_SOURCES
         src/app/options.cpp
         src/app/signal_handling.cpp
-        src/app/source_cli.cpp
+        src/app/device_cli.cpp
     )
 
     add_executable(audio_capture_relay
@@ -88,9 +90,11 @@ if(ACR_BUILD_TESTS)
 
     add_executable(acr_tests
         tests/test_drift_control.cpp
+        tests/test_error_log.cpp
         tests/test_level_meter.cpp
+        tests/test_output_mix.cpp
         tests/test_pcm_ring.cpp
-        tests/test_source_match.cpp
+        tests/test_device_match.cpp
         tests/test_splice.cpp
         tests/test_text_util.cpp
         tests/test_waveform.cpp

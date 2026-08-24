@@ -5,11 +5,11 @@
 #include "adapters/plain_status.h"
 #include "adapters/pulse_capture.h"
 #include "adapters/pulse_playback.h"
-#include "adapters/pulse_source_lister.h"
+#include "adapters/pulse_device_lister.h"
 #include "adapters/tui_ncurses.h"
 #include "app/options.h"
 #include "app/signal_handling.h"
-#include "app/source_cli.h"
+#include "app/device_cli.h"
 #include "domain/shared_state.h"
 
 #include <iostream>
@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
     if (!parsed) return 1;
     const acr::Options opt = *parsed;
 
-    acr::PulseSourceLister lister;
+    acr::PulseDeviceLister lister;
     std::string error;
     if (!lister.query(error)) {
         std::cerr << "Failed to query PulseAudio/PipeWire-Pulse sources: " << error << "\n";
@@ -31,6 +31,7 @@ int main(int argc, char** argv) {
 
     if (opt.list) {
         acr::print_sources(sources);
+        acr::print_sinks(lister.sinks());
         return 0;
     }
 
@@ -40,7 +41,18 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    bool sink_failed = false;
+    auto sink = acr::choose_sink(lister.sinks(), opt.sink_arg, sink_failed);
+    if (sink_failed) {
+        std::cerr << "\nUse --list to inspect available sinks.\n";
+        return 1;
+    }
+
     acr::SharedState st;
+    if (sink) {
+        st.sink_name = sink->name;
+        st.sink_description = sink->description;
+    }
     st.source_name = selected->name;
     st.source_description = selected->description;
     st.source_is_monitor = selected->is_monitor;
@@ -55,6 +67,7 @@ int main(int argc, char** argv) {
         << "  source: " << st.source_description << "\n"
         << "  name:   " << st.source_name << "\n"
         << "  type:   " << (st.source_is_monitor ? "MONITOR/output-capture" : "INPUT") << "\n"
+        << "  output: " << (st.sink_description.empty() ? "(default sink)" : st.sink_description) << "\n"
         << "Press Ctrl+C to stop.\n";
     }
 
@@ -68,5 +81,11 @@ int main(int argc, char** argv) {
     if (capture.joinable()) capture.join();
     if (playback.joinable()) playback.join();
 
-    return 0;
+    // TUI 中は画面を壊さないよう stderr に出していないので、閉じたあとに出す。
+    auto err = st.errors.snapshot();
+    if (err.count > 0) {
+        std::cerr << "Last error (" << err.count << " total): " << err.message << "\n";
+    }
+
+    return st.aborted.load() ? 1 : 0;
 }

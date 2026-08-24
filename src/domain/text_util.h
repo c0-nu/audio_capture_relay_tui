@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <string>
 
 // 文字列の小道具。UTF-8 を壊さずに切り詰める shorten が本体。
@@ -15,5 +16,10 @@ namespace acr {
 
     // 全桁が数字のときだけ true。負号・空白は受け付けない。
     bool parse_index(const std::string& s, std::size_t& out);
+
+    // 数値の解釈。文字列全体を使い切らなければ失敗(例: "80abc" は拒否)。
+    // 例外は投げない —— CLI の不正入力で異常終了しないための入口。
+    std::optional<int> parse_int(const std::string& s);
+    std::optional<float> parse_float(const std::string& s);
 
 } // namespace acr

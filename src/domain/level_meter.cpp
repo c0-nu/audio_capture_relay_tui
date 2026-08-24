@@ -5,8 +5,8 @@
 
 namespace acr {
 
-    ChunkAnalysis analyze_chunk(const std::vector<int16_t>& interleaved, std::size_t frames, float volume) {
-        ChunkAnalysis out;
+    void analyze_chunk(const std::vector<int16_t>& interleaved, std::size_t frames, float volume, ChunkAnalysis& out) {
+        out.mono.clear();
         out.mono.reserve(frames);
 
         double sum_l = 0.0;
@@ -37,7 +37,6 @@ namespace acr {
         out.peak_l = peak_l;
         out.peak_r = peak_r;
         out.clip_ratio = static_cast<float>(clips) / std::max<std::size_t>(1, frames);
-        return out;
     }
 
 } // namespace acr

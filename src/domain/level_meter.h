@@ -16,7 +16,8 @@ namespace acr {
         std::vector<float> mono;   // 波形表示用のモノラルミックス
     };
 
-    // interleaved(S16LE ステレオ)を volume 倍して解析する。副作用なし。
-    ChunkAnalysis analyze_chunk(const std::vector<int16_t>& interleaved, std::size_t frames, float volume);
+    // interleaved(S16LE ステレオ)を volume 倍して解析し、out へ書く。
+    // out.mono は clear して詰め直すので、使い回せば毎チャンクの確保が要らない。
+    void analyze_chunk(const std::vector<int16_t>& interleaved, std::size_t frames, float volume, ChunkAnalysis& out);
 
 } // namespace acr
