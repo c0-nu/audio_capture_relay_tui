@@ -79,6 +79,16 @@ TUIなし:
 | `w` | 点字波形表示のon/off |
 | `p` or Space | pause / resume |
 
+## レイテンシ
+
+`--latency-ms`(既定 120)は **capture から実際に音が出るまでの合計**に対する目標です。
+AudioCaptureRelay 自身のバッファと、PulseAudio / PipeWire 側のキューの両方を見て、
+再生の消費量を少しずつ調整して合わせます。
+
+TUI の `Latency:` 行に内訳(`ring` = 自前のバッファ、`out` = サーバ側)が出ます。
+`out` が目標より深い環境では目標まで下げられません。その場合は `[hold]` と表示され、
+実レイテンシは `out` + 少しの予備で落ち着きます。`--latency-ms` を上げると余裕が増えます。
+
 ## 注意
 
 `.monitor` source は「出力デバイスへ流れている音」をcaptureします。
