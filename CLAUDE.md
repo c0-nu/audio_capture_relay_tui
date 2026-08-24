@@ -238,6 +238,26 @@ S16LE / 48000Hz / 2ch 固定(`domain/audio_format.h`)。可変にする予定は
 
 ---
 
+## 次の一手(2026-08-24 時点)
+
+1. **PipeWire の quantum を下げた前後を実測する。** 現在 1024(21.3ms)。
+   `out` の 30ms 前後はこれが正体なので、ここが最後に残った下げ代。
+
+   ```bash
+   pw-metadata -n settings 0 clock.force-quantum 256   # 5.3ms
+   ./build/audio_capture_relay --no-tui --volume 0 --source 0 --low-latency   # 60〜90 秒
+   pw-metadata -n settings 0 clock.force-quantum 0     # 戻す
+   ```
+
+   **全アプリに効く設定**なので、実行前に「今流していいか」を確認すること
+   (通話中だと他の音が途切れる)。予想は合計 25〜35ms。
+2. その結果次第で `PACE_SLACK_CHUNKS` / `min_ring_frames` を CLI から触れるようにするか判断。
+   chunk 5ms では現状サーバ側の下限が支配的で、slack を 4 -> 2 に下げても縮まなかった
+   (実測 50ms で変化なし)。quantum を下げると話が変わる可能性がある。
+3. `feat/low-latency`(`--low-latency` プリセット)は **main へ未マージ**。
+
+---
+
 ## 未決事項(勝手に決めない)
 
 - `PACE_SLACK_CHUNKS`(4)と `min_ring_frames`(2 チャンク)を CLI から触れるようにするか。
