@@ -2,7 +2,9 @@
 
 #include <chrono>
 #include <iomanip>
+#include <cmath>
 #include <iostream>
+#include <string>
 #include <thread>
 
 namespace acr {
@@ -29,6 +31,9 @@ namespace acr {
             << frames_to_ms(static_cast<double>(st.smoothed_total_frames.load())) << "ms"
             << "(ring " << frames_to_ms(static_cast<double>(st.ring.frames_buffered()))
             << "/out " << frames_to_ms(static_cast<double>(st.downstream_frames.load())) << ")"
+            << (st.raised_target.load()
+                ? " floor=" + std::to_string(std::lround(frames_to_ms(static_cast<double>(st.effective_target_frames.load())))) + "ms"
+                : "")
             << " drift=" << st.drift_ms.load() << "ms"
             << " underruns=" << st.underruns.load()
             << " overflow_trims=" << st.overflow_trims.load()

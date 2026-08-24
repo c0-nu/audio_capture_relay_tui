@@ -17,8 +17,13 @@ namespace acr {
 
     namespace {
 
-        // プライミングで流す無音の上限(安全弁)。実測では 40 チャンク前後で詰まる。
-        constexpr int PREFILL_MAX_CHUNKS = 150;
+        // サーバ側キューに持たせる上限(チャンク数)。書き込みが実時間より
+        // これ以上先行しないよう自分で待つ = サーバ側の滞留がここで頭打ちになる。
+        //
+        // サーバは走り出しに「飲み放題」の時期があり、pa_buffer_attr では止まらない
+        // (実測: 目標 1000ms でリングに貯めた 980ms が一瞬で 111ms まで持って行かれた)。
+        // 書く側で実時間ペースを守れば、目標がいくつでもこれが起きない。
+        constexpr int PACE_SLACK_CHUNKS = 4;
 
         // capture 側と同じく、失敗が続いたら打ち切る。
         constexpr auto FAILURE_LIMIT = std::chrono::seconds(3);
@@ -83,51 +88,68 @@ namespace acr {
             return downstream_frames;
         };
 
+        // 実時間ペースを守る。書き込みが実時間より pace_slack 以上先行しないよう待つ。
+        // これがそのまま「サーバ側に持たせる量の上限」になる。
+        const auto chunk_duration = std::chrono::microseconds(1000000LL * chunk_frames / SAMPLE_RATE);
+        const auto pace_slack = chunk_duration * PACE_SLACK_CHUNKS;
+
+        const int slack_frames = chunk_frames * PACE_SLACK_CHUNKS;
+
+        std::uint64_t written_frames = 0;
+        auto stream_start = std::chrono::steady_clock::now();
+
+        auto pace = [&]() {
+            // サーバ側の滞留が実測できていて、しかも浅いなら、先行していない。
+            // その時点を基準に取り直す —— 壁時計とオーディオクロックは少しずつ
+            // ずれるので、絶対スケジュールを持ち続けると何十分か後に「先行して
+            // いないのに待つ」ようになり、サーバ側を枯らしてしまう。
+            const std::int64_t out = query_downstream();
+            if (out > 0 && out <= slack_frames) {
+                stream_start = std::chrono::steady_clock::now();
+                written_frames = static_cast<std::uint64_t>(out);
+                return;
+            }
+
+            // 実測できない(走り出しは 0 を返す)か、深すぎる場合は壁時計で抑える。
+            const auto scheduled = stream_start
+            + std::chrono::microseconds(1000000LL * static_cast<long long>(written_frames) / SAMPLE_RATE)
+            - pace_slack;
+            const auto now = std::chrono::steady_clock::now();
+            if (now < scheduled) std::this_thread::sleep_for(scheduled - now);
+        };
+
         // --- プライミング ---
-        // サーバ側は走り出しのしばらく「飲み放題」で、書き込みがまったくブロックしない
-        // (実測で 700ms 以上。pa_buffer_attr の maxlength とは無関係で、この間に書いた
-        // 分は latency にも出てこない)。ここへ実音声を流すとリングが数百 us で空になり、
-        // 起動直後に underrun が並ぶ。なので:
-        //
-        //   1. 詰まる(= 書き込みがチャンク長で律速され始める)まで**無音**を流す
-        //   2. リングを目標水位に合わせる。足りなければ待ち、多ければ削る
-        //
-        // 2 で削るのは中継開始前の音なので、落としても誰も困らない。
-        const int ring_start_frames = std::max(target_frames, cfg.start_ring_frames());
+        // リングが目標水位に達するまで、**無音を流し続けながら**待つ。
+        //   - 実音声で埋めるとリングから取られる
+        //   - かといって何も書かずに待つと、待っている間にサーバ側が枯れる
+        //     (目標が大きいほど待ちが長い。実測で out が 0 に張り付いた)
+        // リングの持ち分は「目標 - サーバ側に持たせる分」。ペースを守る限り
+        // サーバ側は pace_slack で頭打ちなので、get_latency を待たずに決められる。
+        const int ring_start_frames = std::max(cfg.start_ring_frames(), target_frames - slack_frames);
 
         {
             const std::vector<int16_t> silence(static_cast<std::size_t>(chunk_frames) * CHANNELS, 0);
-            const auto chunk_duration = std::chrono::microseconds(1000000LL * chunk_frames / SAMPLE_RATE);
-            int slow_writes = 0;
-
-            for (int i = 0; i < PREFILL_MAX_CHUNKS && st.is_running(); ++i) {
-                auto started = std::chrono::steady_clock::now();
+            while (st.is_running() && st.ring.frames_buffered() < static_cast<std::size_t>(ring_start_frames)) {
                 if (pa_simple_write(play, silence.data(), silence.size() * sizeof(int16_t), &error) < 0) break;
-
-                // 1 回の遅さはスケジューリングのぶれでも起きるので、2 回続けて見る。
-                if (std::chrono::steady_clock::now() - started > chunk_duration / 2) {
-                    if (++slow_writes >= 2) break;
-                } else {
-                    slow_writes = 0;
-                }
+                written_frames += static_cast<std::uint64_t>(chunk_frames);
+                pace();
             }
         }
 
-        while (st.is_running() && st.ring.frames_buffered() < static_cast<std::size_t>(ring_start_frames)) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
+        // 貯まりすぎた分は捨てる(中継開始前の音なので落としてよい)。
         st.ring.trim(static_cast<std::size_t>(ring_start_frames));
 
         FailureWindow failures(FAILURE_LIMIT);
 
         DriftController drift(target_frames, chunk_frames, cfg.chunk_ms, cfg.min_ring_frames(),
-                              static_cast<std::int64_t>(st.ring.frames_buffered()) + query_downstream());
+                              static_cast<std::int64_t>(st.ring.frames_buffered()), query_downstream());
 
         while (st.is_running()) {
             auto decision = drift.update(static_cast<std::int64_t>(st.ring.frames_buffered()), query_downstream());
             st.smoothed_total_frames.store(decision.smoothed_total_frames);
             st.downstream_frames.store(downstream_frames);
-            st.reserve_hold.store(decision.reserve_hold);
+            st.effective_target_frames.store(decision.effective_target_frames);
+            st.raised_target.store(decision.raised_target);
             st.drift_ms.store(decision.drift_ms);
 
             auto popped = st.ring.pop(static_cast<std::size_t>(decision.consume_frames), popped_buffer);
@@ -146,6 +168,8 @@ namespace acr {
                 continue;
             }
             failures.record_success();
+            written_frames += static_cast<std::uint64_t>(chunk_frames);
+            pace();
         }
 
         pa_simple_drain(play, &error);

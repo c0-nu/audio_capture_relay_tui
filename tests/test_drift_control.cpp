@@ -13,8 +13,8 @@ namespace {
     constexpr int TARGET = 5760;
     constexpr int MIN_RING = 1920;
 
-    DriftController make(std::int64_t initial_total = TARGET) {
-        return DriftController(TARGET, CHUNK, 20, MIN_RING, initial_total);
+    DriftController make(std::int64_t initial_ring = TARGET - 1920, std::int64_t initial_out = 1920) {
+        return DriftController(TARGET, CHUNK, 20, MIN_RING, initial_ring, initial_out);
     }
 
 } // namespace
@@ -25,7 +25,7 @@ TEST_CASE("目標どおりなら補正しない", "[drift]") {
         auto d = drift.update(TARGET - 1920, 1920);
         REQUIRE(d.consume_frames == CHUNK);
         REQUIRE(d.drift_ms == 0);
-        REQUIRE_FALSE(d.reserve_hold);
+        REQUIRE_FALSE(d.raised_target);
     }
 }
 
@@ -69,7 +69,7 @@ TEST_CASE("恒常的に溜まっていれば多めに消費する", "[drift]") {
 }
 
 TEST_CASE("恒常的に枯れていれば少なめに消費する", "[drift]") {
-    auto drift = make();
+    auto drift = make(TARGET / 2, 0);
     bool held_back = false;
 
     for (int i = 0; i < 400; ++i) {
@@ -95,23 +95,47 @@ TEST_CASE("リングだけでなくサーバ側の滞留も見る", "[drift]") {
     CHECK(drains);
 }
 
-TEST_CASE("リングの予備を割ってまで排出しない", "[drift]") {
-    // サーバ側が目標より深い環境。合計は超過しているが、引けるのはリングからだけ。
-    // 予備を割って引くとその場で枯れるので、深いまま受け入れる。
-    auto drift = make(TARGET * 3);
-    bool saw_hold = false;
+TEST_CASE("届かない目標では実現できる一番浅い水位を狙う", "[drift]") {
+    // サーバ側が目標(120ms)より深い環境 —— 例えば 200ms 抱えている。
+    // いくら排出しても届かないので、狙いを「サーバ側 + リングの予備」に切り替える。
+    // ここを開ループにすると(以前の実装)、リングの水位が成り行きになって
+    // いずれ枯れる。回帰テスト。
+    const std::int64_t deep_out = 9600; // 200ms
+    auto drift = DriftController(TARGET, CHUNK, 20, MIN_RING, MIN_RING, deep_out);
 
+    DriftController::Decision d{};
     for (int i = 0; i < 400; ++i) {
-        auto d = drift.update(MIN_RING, TARGET * 2); // リングは予備ぴったり
-        REQUIRE(d.consume_frames <= CHUNK);
-        if (d.reserve_hold) saw_hold = true;
+        d = drift.update(MIN_RING, deep_out);
     }
 
-    CHECK(saw_hold);
+    CHECK(d.raised_target);
+    CHECK(d.effective_target_frames == deep_out + MIN_RING);
+    CHECK(d.consume_frames == CHUNK);  // 狙いどおりなので補正しない = 開ループにならない
+    CHECK(d.drift_ms == 0);
+}
+
+TEST_CASE("届かない目標でも、薄くなれば貯めに行く", "[drift]") {
+    const std::int64_t deep_out = 9600;
+    auto drift = DriftController(TARGET, CHUNK, 20, MIN_RING, MIN_RING, deep_out);
+
+    bool refills = false;
+    for (int i = 0; i < 400; ++i) {
+        auto d = drift.update(MIN_RING / 4, deep_out); // 予備を大きく割っている
+        if (d.consume_frames < CHUNK) refills = true;
+    }
+
+    CHECK(refills);
+}
+
+TEST_CASE("届く目標なら押し上げない", "[drift]") {
+    auto drift = make();
+    auto d = drift.update(TARGET - 1920, 1920);
+    CHECK_FALSE(d.raised_target);
+    CHECK(d.effective_target_frames == TARGET);
 }
 
 TEST_CASE("drift_ms は目標との差を ms で返す", "[drift]") {
-    auto drift = DriftController(TARGET, CHUNK, 20, MIN_RING, TARGET + 4800);
+    auto drift = DriftController(TARGET, CHUNK, 20, MIN_RING, TARGET + 4800, 0);
     auto d = drift.update(TARGET + 4800, 0); // +100ms
     CHECK(d.drift_ms > 90);
     CHECK(d.drift_ms <= 100);

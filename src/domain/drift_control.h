@@ -27,6 +27,13 @@
 //      crosses a whole frame. In normal operation this fires at most a
 //      couple of times per second, not every chunk.
 //
+// 目標が実現可能とは限らない。サーバ側キューとデバイスのバッファが目標より深い
+// 環境では(例: --latency-ms 20 でサーバが 70ms 抱えている)、いくら排出しても
+// 届かない。そこで実際に狙う水位を
+//     max(要求値, サーバ側の滞留 + リングの予備)
+// とする。こうしないと「常に排出したいが予備を割れないので何もしない」という
+// 開ループ状態になり、リングの水位が成り行き任せになる(いずれ枯れる)。
+//
 // 制御対象は「自分のリングバッファ + サーバ側キュー」の**合計**。
 // リングだけを見ていると、起動直後にサーバ側キューへ音が移った分を「減った」と
 // 誤認し、目標へ戻すのに十数秒かける(その間バッファが浅く、枯れやすい)。
@@ -43,10 +50,11 @@ namespace acr {
     class DriftController {
     public:
         struct Decision {
-            int consume_frames = 0;                // このチャンクで取り出すフレーム数
+            int consume_frames = 0;                 // このチャンクで取り出すフレーム数
             std::int64_t smoothed_total_frames = 0; // 平滑後の合計滞留(表示用)
-            std::int64_t drift_ms = 0;             // 目標との差。+ は溜まりすぎ、- は枯れ気味
-            bool reserve_hold = false;             // リングの予備を守るため、排出を見送った
+            std::int64_t effective_target_frames = 0; // 実際に狙っている水位(下限で押し上げた後)
+            std::int64_t drift_ms = 0;              // 目標との差。+ は溜まりすぎ、- は枯れ気味
+            bool raised_target = false;             // 要求値では届かないので押し上げた
         };
 
         // target_total_frames … リング + サーバ側キューの目標
@@ -56,7 +64,8 @@ namespace acr {
                         int chunk_frames,
                         int chunk_ms,
                         int min_ring_frames,
-                        std::int64_t initial_total_frames);
+                        std::int64_t initial_ring_frames,
+                        std::int64_t initial_downstream_frames);
 
         Decision update(std::int64_t ring_frames, std::int64_t downstream_frames);
 
@@ -66,6 +75,7 @@ namespace acr {
         int min_ring_frames_;
         double chunks_for_full_correction_;
         double smoothed_total_;
+        double smoothed_downstream_;
         double correction_debt_ = 0.0;
     };
 

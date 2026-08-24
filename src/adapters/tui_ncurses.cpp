@@ -137,11 +137,16 @@ namespace acr {
 
             std::ostringstream line;
             line << "Latency: " << std::fixed << std::setprecision(0) << frames_to_ms(static_cast<double>(total_frames))
-            << "ms / target " << cfg.latency_ms << "ms"
-            << "  (ring " << frames_to_ms(static_cast<double>(ring_frames))
+            << "ms / target " << cfg.latency_ms << "ms";
+
+            // 要求どおりに下げられない環境では、実際に狙っている水位も出す。
+            if (st.raised_target.load()) {
+                line << " (floor " << frames_to_ms(static_cast<double>(st.effective_target_frames.load())) << "ms)";
+            }
+
+            line << "  (ring " << frames_to_ms(static_cast<double>(ring_frames))
             << " + out " << frames_to_ms(static_cast<double>(out_frames)) << ")"
             << " drift " << (drift_ms >= 0 ? "+" : "") << drift_ms << "ms"
-            << (st.reserve_hold.load() ? " [hold]" : "")
             << " | underruns " << st.underruns.load()
             << " | overflow trims " << st.overflow_trims.load();
             draw_line(row++, cols, line.str());

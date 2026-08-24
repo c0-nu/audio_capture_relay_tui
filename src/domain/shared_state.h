@@ -40,7 +40,8 @@ namespace acr {
         // 生のリング水位は ring.frames_buffered() が正。ここには置かない(二重管理を避ける)。
         std::atomic<std::int64_t> smoothed_total_frames{0};    // 平滑後の合計滞留(表示用)
         std::atomic<std::int64_t> downstream_frames{0};        // サーバ側キューの滞留(表示用)
-        std::atomic<bool> reserve_hold{false};                 // リングの予備を守って排出を見送っている
+        std::atomic<std::int64_t> effective_target_frames{0};  // 実際に狙っている水位
+        std::atomic<bool> raised_target{false};                // 要求値では届かず押し上げた
         std::atomic<std::int64_t> drift_ms{0};                 // signed: +too much buffered, -starving
         std::atomic<std::uint64_t> underruns{0};               // times playback ran out of buffered audio
         std::atomic<std::uint64_t> overflow_trims{0};          // times the ring buffer hit its safety-net cap
