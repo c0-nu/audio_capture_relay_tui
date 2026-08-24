@@ -15,6 +15,7 @@ namespace acr {
                 partial_.min = std::min(partial_.min, v);
                 partial_.max = std::max(partial_.max, v);
             }
+            partial_.last = v;
 
             if (++partial_count_ >= bucket_samples_) {
                 buckets_.push_back(partial_);

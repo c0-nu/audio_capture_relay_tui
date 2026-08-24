@@ -57,6 +57,10 @@ namespace acr {
                     st.muted.store(!st.muted.load());
                 } else if (ch == 'w' || ch == 'W') {
                     st.waveform_enabled.store(!st.waveform_enabled.load());
+                } else if (ch == 's' || ch == 'S') {
+                    st.waveform_style.store(st.waveform_style.load() == WaveformStyle::Envelope
+                                            ? WaveformStyle::Line
+                                            : WaveformStyle::Envelope);
                 } else if (ch == 'p' || ch == 'P' || ch == ' ') {
                     st.paused.store(!st.paused.load());
                 }
@@ -131,8 +135,11 @@ namespace acr {
                 return;
             }
 
+            const WaveformStyle style = st.waveform_style.load();
+
             if (has_colors()) attron(COLOR_PAIR(COLOR_INFO));
-            draw_line(9, cols, "Waveform: Unicode Braille, mono mix, recent history");
+            draw_line(9, cols, std::string("Waveform: Unicode Braille, mono mix, recent history  [")
+                      + waveform_style_name(style) + "]");
             if (has_colors()) attroff(COLOR_PAIR(COLOR_INFO));
 
             std::vector<WaveBucket> buckets = st.wave.snapshot();
@@ -141,7 +148,7 @@ namespace acr {
             int wave_rows = std::max(1, rows - wave_top - 2);
             int wave_cols = std::max(1, cols - 1);
 
-            auto lines = make_braille_waveform(buckets, wave_cols, wave_rows);
+            auto lines = make_braille_waveform(buckets, wave_cols, wave_rows, style);
             for (int i = 0; i < static_cast<int>(lines.size()) && wave_top + i < rows - 1; ++i) {
                 mvaddstr(wave_top + i, 0, lines[i].c_str());
             }
@@ -169,7 +176,7 @@ namespace acr {
 
             draw_header(st, cols);
             draw_levels(st, cfg, cols);
-            draw_line(rows - 1, cols, "q quit | +/- volume | m mute | w waveform | p pause");
+            draw_line(rows - 1, cols, "q quit | +/- volume | m mute | w waveform | s style | p pause");
             draw_buffer_line(st, cfg, cols);
             draw_waveform(st, rows, cols);
 

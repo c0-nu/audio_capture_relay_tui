@@ -69,6 +69,19 @@ TUIなし:
 ./build/audio_capture_relay --no-waveform
 ```
 
+波形の描き方を選ぶ:
+
+```bash
+./build/audio_capture_relay --waveform-style line
+```
+
+| Style | 見た目 | 特徴 |
+|---|---|---|
+| `envelope`(既定) | 各列の最小〜最大を塗る | 幅が狭くてもピークを取りこぼさない |
+| `line` | 各列から1点拾って繋ぐ | オシロスコープ風の細い線 |
+
+実行中に `s` でいつでも切り替えられます。
+
 ## 実行中キー
 
 | Key | Action |
@@ -77,6 +90,7 @@ TUIなし:
 | `+` / `-` | ソフトウェア音量変更 |
 | `m` | mute / unmute |
 | `w` | 点字波形表示のon/off |
+| `s` | 波形の描き方切り替え (envelope / line) |
 | `p` or Space | pause / resume |
 
 ## レイテンシ

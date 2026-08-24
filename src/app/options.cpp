@@ -20,6 +20,7 @@ namespace acr {
         << "  --chunk-ms MS           Read/write chunk size. Default: 20.\n"
         << "  --no-tui               Print plain status instead of full-screen TUI.\n"
         << "  --no-waveform          Start with waveform hidden.\n"
+        << "  --waveform-style STYLE  envelope (default) or line. Switchable at runtime with s.\n"
         << "  --help                 Show this help.\n";
     }
 
@@ -64,6 +65,15 @@ namespace acr {
                 opt.tui = false;
             } else if (a == "--no-waveform") {
                 opt.waveform = false;
+            } else if (a == "--waveform-style") {
+                auto v = need_value(a);
+                if (!v) return std::nullopt;
+                auto style = parse_waveform_style(*v);
+                if (!style) {
+                    std::cerr << "Unknown waveform style: " << *v << " (expected envelope or line)\n";
+                    return std::nullopt;
+                }
+                opt.waveform_style = *style;
             } else {
                 std::cerr << "Unknown option: " << a << "\n";
                 print_usage(argv[0]);

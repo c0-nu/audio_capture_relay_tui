@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <string>
 
 namespace acr {
 
@@ -32,7 +33,20 @@ namespace acr {
 
     } // namespace
 
-    std::vector<std::string> make_braille_waveform(const std::vector<WaveBucket>& buckets, int cols, int rows) {
+    const char* waveform_style_name(WaveformStyle style) {
+        return style == WaveformStyle::Line ? "line" : "envelope";
+    }
+
+    std::optional<WaveformStyle> parse_waveform_style(const std::string& s) {
+        if (s == "envelope") return WaveformStyle::Envelope;
+        if (s == "line") return WaveformStyle::Line;
+        return std::nullopt;
+    }
+
+    std::vector<std::string> make_braille_waveform(const std::vector<WaveBucket>& buckets,
+                                                   int cols,
+                                                   int rows,
+                                                   WaveformStyle style) {
         if (cols <= 0 || rows <= 0) return {};
         if (buckets.empty()) return std::vector<std::string>(rows, std::string());
 
@@ -54,15 +68,25 @@ namespace acr {
         for (int x = 0; x < pixel_w; ++x) {
             Span span = span_for_column(x, pixel_w, buckets.size());
 
-            float lo = buckets[span.begin].min;
-            float hi = buckets[span.begin].max;
-            for (std::size_t b = span.begin + 1; b < span.end; ++b) {
-                lo = std::min(lo, buckets[b].min);
-                hi = std::max(hi, buckets[b].max);
-            }
+            int top = 0;
+            int bottom = 0;
 
-            const int top = y_of(hi);
-            const int bottom = y_of(lo);
+            if (style == WaveformStyle::Envelope) {
+                // 列が受け持つ範囲の min〜max を塗る。幅が狭くてもピークが残る。
+                float lo = buckets[span.begin].min;
+                float hi = buckets[span.begin].max;
+                for (std::size_t b = span.begin + 1; b < span.end; ++b) {
+                    lo = std::min(lo, buckets[b].min);
+                    hi = std::max(hi, buckets[b].max);
+                }
+                top = y_of(hi);
+                bottom = y_of(lo);
+            } else {
+                // 代表サンプルを 1 点だけ拾う。隣の列との間は下の橋渡しで繋がるので、
+                // 見た目は 1 本の線になる。
+                const float value = buckets[span.end - 1].last;
+                top = bottom = y_of(value);
+            }
 
             // 隣の列と縦に離れていたら橋渡しして、途切れた点の集まりに見えないようにする。
             int draw_top = top;

@@ -3,6 +3,7 @@
 #include "domain/audio_format.h"
 #include "domain/pcm_ring.h"
 #include "domain/wave_history.h"
+#include "domain/waveform.h"
 
 #include <atomic>
 #include <cstdint>
@@ -37,6 +38,7 @@ namespace acr {
         std::atomic<float> volume{1.0f};
         std::atomic<bool> muted{false};
         std::atomic<bool> waveform_enabled{true};
+        std::atomic<WaveformStyle> waveform_style{WaveformStyle::Envelope};
         std::atomic<bool> paused{false};
 
         std::atomic<float> rms_l{0.0f};

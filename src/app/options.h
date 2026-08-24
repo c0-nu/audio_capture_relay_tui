@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/relay_config.h"
+#include "domain/waveform.h"
 
 #include <optional>
 #include <string>
@@ -12,6 +13,7 @@ namespace acr {
         bool list = false;                // --list
         bool tui = true;                  // --no-tui で false
         bool waveform = true;             // --no-waveform で false(波形表示の初期値)
+        WaveformStyle waveform_style = WaveformStyle::Envelope; // --waveform-style
         bool interactive_select = false;  // --select
         std::string source_arg;           // --source の値
         float volume = 1.0f;              // --volume(0.0〜4.0)

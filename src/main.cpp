@@ -46,6 +46,7 @@ int main(int argc, char** argv) {
     st.source_is_monitor = selected->is_monitor;
     st.volume.store(opt.volume);
     st.waveform_enabled.store(opt.waveform);
+    st.waveform_style.store(opt.waveform_style);
 
     acr::install_signal_handlers(st);
 
