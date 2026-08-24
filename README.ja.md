@@ -96,6 +96,20 @@ source一覧:
 `bluez_input.XX_XX_XX_XX_XX_XX.a2dp-source`、ヘッドセットへ**送っている**音は
 `bluez_output.XX_….monitor`)。`--list` に出てくるので、そのまま `--source` で選べます。
 
+中継せず、ビジュアライザとしてだけ使う:
+
+```bash
+./build/audio_capture_relay --no-relay
+```
+
+source を読んで表示はしますが、**再生ストリームを一切作りません**。`pavucontrol` にも
+出ませんし、画面共有にも乗りません。ドリフト補正も動きません。レベルと波形だけ
+眺めたいときはこちら。
+
+`--volume 0` とは別物です。あちらは再生ストリームを開いたままレイテンシ制御も
+回り続けます。`--no-relay` では音量 / mute / pause と `Latency:` 行がまとめて
+消えます(どれも意味を持たないため)。
+
 TUIなし:
 
 ```bash

@@ -21,6 +21,7 @@ namespace acr {
         << "  --volume PERCENT       Software output volume. Default: 100.\n"
         << "  --latency-ms MS         Playback buffer target. Default: 120.\n"
         << "  --chunk-ms MS           Read/write chunk size. Default: 20.\n"
+        << "  --no-relay             Only capture and visualize. No playback stream is created.\n"
         << "  --no-tui               Print plain status instead of full-screen TUI.\n"
         << "  --no-waveform          Start with waveform hidden.\n"
         << "  --waveform-style STYLE  envelope (default) or line. Switchable at runtime with s.\n"
@@ -111,6 +112,8 @@ namespace acr {
                 chunk_given = true;
             } else if (a == "--low-latency") {
                 low_latency = true;
+            } else if (a == "--no-relay") {
+                opt.relay_enabled = false;
             } else if (a == "--no-tui") {
                 opt.tui = false;
             } else if (a == "--no-waveform") {

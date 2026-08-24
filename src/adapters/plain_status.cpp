@@ -20,13 +20,27 @@ namespace acr {
                 shown_errors = err.count;
             }
 
-            std::cout << "\r"
-            << "vol=" << std::fixed << std::setprecision(0) << st.volume.load() * 100.0f << "%"
-            << (st.muted.load() ? " muted" : "      ")
-            << " peakL=" << std::setprecision(2) << st.peak_l.load()
+            std::cout << "\r";
+            if (st.relay_enabled) {
+                std::cout << "vol=" << std::fixed << std::setprecision(0) << st.volume.load() * 100.0f << "%"
+                << (st.muted.load() ? " muted" : "      ");
+            } else {
+                std::cout << "no-relay    ";
+            }
+            std::cout
+            << " peakL=" << std::fixed << std::setprecision(2) << st.peak_l.load()
             << " peakR=" << std::setprecision(2) << st.peak_r.load()
             << " frames=" << st.frames_captured.load()
-            << " errors=" << st.errors.count()
+            << " errors=" << st.errors.count();
+
+            // 中継していないときはリングもサーバ側キューも使っていない。
+            if (!st.relay_enabled) {
+                std::cout << "        " << std::flush;
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                continue;
+            }
+
+            std::cout
             << " lat=" << std::setprecision(0)
             << frames_to_ms(static_cast<double>(st.smoothed_total_frames.load())) << "ms"
             << "(ring " << frames_to_ms(static_cast<double>(st.ring.frames_buffered()))

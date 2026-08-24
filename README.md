@@ -68,6 +68,7 @@ cd packaging && makepkg -si
 ./build/audio_capture_relay --source monitor # by exact name or substring
 ./build/audio_capture_relay --select        # pick interactively
 ./build/audio_capture_relay --sink hdmi     # choose the output sink
+./build/audio_capture_relay --no-relay      # capture and visualize only, no playback
 ./build/audio_capture_relay --no-tui        # one-line status instead of the TUI
 ./build/audio_capture_relay --no-waveform   # start with the waveform hidden
 ```
@@ -84,6 +85,20 @@ Waveform drawing style:
 | `line` | picks one sample per column and joins them | thin oscilloscope-style trace |
 
 Press `s` to switch at any time.
+
+### Visualizing without relaying
+
+```bash
+./build/audio_capture_relay --no-relay
+```
+
+Reads the source and draws it, but **creates no playback stream at all** — nothing
+appears in `pavucontrol`, nothing reaches a screen share, and no drift correction runs.
+Use it when you only want to watch levels and the waveform.
+
+This is not the same as `--volume 0`, which still opens a playback stream and keeps the
+whole latency machinery going. With `--no-relay` the volume, mute, pause keys and the
+`Latency:` line are all gone, because none of them mean anything.
 
 ### Bluetooth sources
 

@@ -66,6 +66,9 @@ namespace acr {
         ErrorLog errors;
 
         // 起動時に一度だけ書き、以降は読むだけ。
+        // false なら再生ストリームを作らない(取り込んで表示するだけ)。
+        // このとき音量・レイテンシ・drift 系のカウンタはどれも意味を持たない。
+        bool relay_enabled = true;
         std::string source_name;
         std::string source_description;
         bool source_is_monitor = false;

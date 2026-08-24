@@ -53,6 +53,7 @@ int main(int argc, char** argv) {
         st.sink_name = sink->name;
         st.sink_description = sink->description;
     }
+    st.relay_enabled = opt.relay_enabled;
     st.source_name = selected->name;
     st.source_description = selected->description;
     st.source_is_monitor = selected->is_monitor;
@@ -67,12 +68,20 @@ int main(int argc, char** argv) {
         << "  source: " << st.source_description << "\n"
         << "  name:   " << st.source_name << "\n"
         << "  type:   " << (st.source_is_monitor ? "MONITOR/output-capture" : "INPUT") << "\n"
-        << "  output: " << (st.sink_description.empty() ? "(default sink)" : st.sink_description) << "\n"
+        << "  output: " << (st.relay_enabled
+                              ? (st.sink_description.empty() ? "(default sink)" : st.sink_description)
+                              : "(none: --no-relay)") << "\n"
         << "Press Ctrl+C to stop.\n";
     }
 
     std::thread capture(acr::run_capture, std::ref(st), std::cref(opt.relay));
-    std::thread playback(acr::run_playback, std::ref(st), std::cref(opt.relay));
+
+    // --no-relay では再生ストリームを作らない。スレッドごと立てないので、
+    // pavucontrol にも出ないし、ドリフト補正も動かない。
+    std::thread playback;
+    if (opt.relay_enabled) {
+        playback = std::thread(acr::run_playback, std::ref(st), std::cref(opt.relay));
+    }
 
     if (opt.tui) acr::run_tui(st, opt.relay);
     else acr::run_plain_status(st);

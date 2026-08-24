@@ -105,8 +105,14 @@ Catch2 v3 はシステムにあればそれを使い、無ければ FetchContent
 ./build/audio_capture_relay --list          # source 一覧
 ./build/audio_capture_relay --select        # 対話選択
 ./build/audio_capture_relay --source 0      # 番号 / 完全一致 / 部分一致
+./build/audio_capture_relay --no-relay      # 中継せず表示だけ(再生ストリームを作らない)
 ./build/audio_capture_relay --no-tui        # TUI なし(1 行ステータス)
+./build/audio_capture_relay --version
 ```
+
+`--help` / `--version` の終了コードは 0、引数エラーは 2。`parse_args` は
+`ParsedArgs`(`options` + `exit_code`)を返す。ここを `optional` に戻さないこと
+(戻すと `--help` がエラー扱いになる)。
 
 - 警告は `-Wall -Wextra -Wpedantic`。**警告ゼロを維持する。**
 - ソースを増やしたら `CMakeLists.txt` の `DOMAIN_SOURCES` / `ADAPTER_SOURCES` / `APP_SOURCES`
@@ -128,6 +134,11 @@ Catch2 v3 はシステムにあればそれを使い、無ければ FetchContent
 | capture | `run_capture` | source から読む → 解析 → リングバッファへ積む |
 | playback | `run_playback` | リングバッファから取る → 音量適用 → 再生ストリームへ書く |
 | 表示(メイン) | `run_tui` / `run_plain_status` | 表示とキー入力 |
+
+**`--no-relay` では playback スレッドを立てない。** 再生ストリームを作らないので、
+`pavucontrol` にも出ないしドリフト補正も動かない。capture もリングに積まない。
+表示層はこれを `SharedState::relay_enabled`(**データ**。起動時に一度だけ書く)で知る。
+中継しているかどうかで意味を失う表示(音量 / `Latency:` 行 / underruns 等)は出さないこと。
 
 停止は `SharedState::running`(atomic)だけで伝える。各スレッドは自分でループを抜ける。
 シグナルハンドラから触ってよいのはこの atomic だけ。
@@ -250,6 +261,50 @@ S16LE / 48000Hz / 2ch 固定(`domain/audio_format.h`)。可変にする予定は
 
 ---
 
+## この先の方向(2026-08-24 に決めたこと)
+
+**「PulseAudio の中継ツール」から「TUI のオーディオ系ツール」へ広げる。** 本人の意向。
+順序は下記。**上から順にやること**(理由も一緒に書いてあるので、飛ばす前に読む)。
+
+1. **済: OSS 公開の下ごしらえ** … MIT / `--version` / `cmake --install` /
+   英語 README(`README.ja.md` が日本語) / GitHub Actions / `packaging/PKGBUILD`。
+   公開先は `github.com/c0-nu/audio_capture_relay_tui`(予定)。
+   リポジトリ名は**当面このまま**。方向が固まってから rename する(GitHub が
+   リダイレクトを張るので急がない)。
+2. **済: `--no-relay`** … 中継せず取り込んで表示するだけ。
+3. **ビジュアライザを内蔵で 2〜3 個増やす** … spectrum(FFT)/ オシロ / Lissajous など。
+   **プラグイン API を先に切らないこと。** 今の `WaveHistory` は min/max/last の
+   エンベロープしか持っておらず、スペクトラム系は作れない。何を渡すべきかは
+   実際に 2〜3 個作るまで分からない。作ってから固める。
+4. **Visualizer プラグイン API** を切る。
+5. **オーディオファイル再生** … `AudioSource` の抽象が要る。デコーダは
+   **`dr_libs`(dr_wav / dr_mp3 / dr_flac)+ `stb_vorbis`** を想定
+   (ヘッダオンリー・public domain / MIT 系なので MIT のままでいられる。
+   `libsndfile` は LGPL、`ffmpeg` は LGPL/GPL なのでライセンスが動く)。
+   **一番の作業はリサンプラ**(ファイルは 44.1kHz が多いが、内部は 48kHz 固定)。
+6. **オーディオフィルタ**(やらない可能性もある)… **既定は無効**。遅延が乗るため。
+
+### プラグインは 2 系統に分けること(Visualizer と Filter を同じ API に載せない)
+
+| | Visualizer | Filter |
+| --- | --- | --- |
+| 走る場所 | 表示スレッド(30fps 程度) | playback のホットパス(5〜20ms ごと) |
+| データ | 履歴を**読むだけ** | 1 チャンクを**書き換える** |
+| 落ちたら | 表示が壊れるだけ。音は続く | 音が止まる |
+| 制約 | ゆるい | ヒープ禁止。遅延・CPU に直結 |
+
+1 本の API にまとめると、ビジュアライザ側の都合(履歴が欲しい / 重い FFT を回したい)が
+ホットパスに漏れる。**別インターフェースで切る。**
+
+フィルタを後回しにするとしても、`assemble_output` の後・`apply_volume` の前に
+**フックを刺せる隙間**だけは空けておくこと(実装は空でよい)。
+
+### Bluetooth 取り込みは実装不要
+
+BT オーディオ機器を繋ぐと、サウンドサーバ側が普通の source として見せる
+(`bluez_input.XX_XX_XX_XX_XX_XX.a2dp-source` / `bluez_output.XX_….monitor`)。
+`--source` でそのまま選べる。**「BT 対応」として何か実装しようとしないこと。**
+
 ## 次の一手(2026-08-24 時点)
 
 ### 済: quantum を下げても縮まない(実測で決着)
@@ -276,7 +331,7 @@ graph quantum とは別枠なので force-quantum では動かない。**「quan
    quantum で話が変わる可能性は消えたので、**判断材料はもう揃っている**。
    chunk 5ms では slack を 4 -> 2 にしても実測 50ms のまま変わらなかった = ALSA 側が
    支配的、というのが結論。触れるようにしても実利は薄い。
-3. `feat/low-latency`(`--low-latency` プリセット)は **main へ未マージ**。
+3. 済: `feat/low-latency` は main へマージ済み。作業ブランチはすべて削除済み。
 
 ---
 

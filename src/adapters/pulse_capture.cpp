@@ -76,8 +76,13 @@ namespace acr {
             }
             failures.record_success();
 
-            float vol = st.muted.load() ? 0.0f : st.volume.load();
-            float analysis_vol = st.paused.load() ? 0.0f : vol;
+            // 中継しないときは音量・mute・pause はどこにも効かないので、
+            // メーターにも掛けない(ソースの生のレベルを見せる)。
+            float analysis_vol = 1.0f;
+            if (st.relay_enabled) {
+                float vol = st.muted.load() ? 0.0f : st.volume.load();
+                analysis_vol = st.paused.load() ? 0.0f : vol;
+            }
 
             analyze_chunk(input, static_cast<std::size_t>(chunk_frames), analysis_vol, analysis);
             st.rms_l.store(analysis.rms_l);
@@ -87,8 +92,10 @@ namespace acr {
             st.clip_ratio.store(analysis.clip_ratio);
             st.wave.append(analysis.mono);
 
-            auto pushed = st.ring.push(input, MAX_RING_FRAMES);
-            if (pushed.trimmed) st.overflow_trims.fetch_add(1);
+            if (st.relay_enabled) {
+                auto pushed = st.ring.push(input, MAX_RING_FRAMES);
+                if (pushed.trimmed) st.overflow_trims.fetch_add(1);
+            }
 
             st.frames_captured.fetch_add(static_cast<std::uint64_t>(chunk_frames));
         }

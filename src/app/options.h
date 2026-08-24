@@ -11,6 +11,7 @@ namespace acr {
     // コマンドライン引数の解析結果。
     struct Options {
         bool list = false;                // --list
+        bool relay_enabled = true;        // --no-relay で false(取り込んで表示するだけ)
         bool tui = true;                  // --no-tui で false
         bool waveform = true;             // --no-waveform で false(波形表示の初期値)
         WaveformStyle waveform_style = WaveformStyle::Envelope; // --waveform-style

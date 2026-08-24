@@ -76,13 +76,16 @@ namespace acr {
         // 行を増やしても以降がずれない。
         int draw_header(SharedState& st, int cols, int row) {
             attron(A_BOLD);
-            draw_line(row++, cols, "AudioCaptureRelay TUI  capture -> application playback");
+            draw_line(row++, cols, st.relay_enabled
+                      ? "AudioCaptureRelay TUI  capture -> application playback"
+                      : "AudioCaptureRelay TUI  capture -> visualize only (--no-relay)");
             attroff(A_BOLD);
 
             std::string kind = st.source_is_monitor ? "MONITOR / output-capture" : "INPUT";
             draw_line(row++, cols, "Source: " + st.source_description + "  [" + kind + "]");
             draw_line(row++, cols, "Name:   " + st.source_name);
-            draw_line(row++, cols, "Output: " + (st.sink_description.empty() ? std::string("(default sink)")
+            draw_line(row++, cols, "Output: " + (!st.relay_enabled ? std::string("(none: --no-relay)")
+                                                 : st.sink_description.empty() ? std::string("(default sink)")
                                                  : st.sink_description));
 
             // エラーは stderr ではなくここに出す(TUI 中に stderr へ書くと画面が壊れる)。
@@ -100,11 +103,15 @@ namespace acr {
 
         int draw_levels(SharedState& st, const RelayConfig& cfg, int cols, int row) {
             std::ostringstream status;
-            status << "Volume: " << std::fixed << std::setprecision(0) << (st.volume.load() * 100.0f) << "%"
-            << (st.muted.load() ? " [MUTED]" : "")
-            << (st.paused.load() ? " [PAUSED]" : "")
-            << " | latency " << cfg.latency_ms << "ms"
-            << " | chunk " << cfg.chunk_ms << "ms"
+            if (st.relay_enabled) {
+                status << "Volume: " << std::fixed << std::setprecision(0) << (st.volume.load() * 100.0f) << "%"
+                << (st.muted.load() ? " [MUTED]" : "")
+                << (st.paused.load() ? " [PAUSED]" : "")
+                << " | latency " << cfg.latency_ms << "ms";
+            } else {
+                status << "Visualize only: nothing is played back";
+            }
+            status << " | chunk " << cfg.chunk_ms << "ms"
             << " | frames " << st.frames_captured.load()
             << " | errors " << st.errors.count();
             draw_line(row++, cols, status.str());
@@ -130,6 +137,9 @@ namespace acr {
         }
 
         int draw_latency(SharedState& st, const RelayConfig& cfg, int cols, int row) {
+            // 中継していなければリングもサーバ側キューも使っていない。0 の行を出さない。
+            if (!st.relay_enabled) return row;
+
             std::int64_t total_frames = st.smoothed_total_frames.load();
             std::int64_t out_frames = st.downstream_frames.load();
             std::int64_t ring_frames = static_cast<std::int64_t>(st.ring.frames_buffered());
@@ -206,7 +216,9 @@ namespace acr {
             row = draw_latency(st, cfg, cols, row);
             draw_waveform(st, rows, cols, row);
 
-            draw_line(rows - 1, cols, "q quit | +/- volume | m mute | w waveform | s style | p pause");
+            draw_line(rows - 1, cols, st.relay_enabled
+                      ? "q quit | +/- volume | m mute | w waveform | s style | p pause"
+                      : "q quit | w waveform | s style");
 
             refresh();
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
