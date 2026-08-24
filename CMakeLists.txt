@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(audio_capture_relay LANGUAGES CXX)
+project(audio_capture_relay VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,6 +7,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(ACR_BUILD_APP "本体(PulseAudio / ncurses が要る)をビルドする" ON)
 option(ACR_BUILD_TESTS "domain のテストをビルドする(本体とは独立)" OFF)
+
+include(GNUInstallDirs)
 
 find_package(Threads REQUIRED)
 
@@ -72,6 +74,16 @@ if(ACR_BUILD_APP)
     target_compile_options(audio_capture_relay PRIVATE
         -Wall -Wextra -Wpedantic
     )
+
+    # --version で出す文字列。生成ファイルを増やさずに済ませる。
+    target_compile_definitions(audio_capture_relay PRIVATE
+        ACR_VERSION="${PROJECT_VERSION}"
+    )
+
+    # パッケージから入れられるように。prefix は cmake --install --prefix で変えられる。
+    install(TARGETS audio_capture_relay RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/licenses/${PROJECT_NAME})
+    install(FILES README.md README.ja.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
 endif()
 
 if(ACR_BUILD_TESTS)

@@ -1,2 +1,9 @@
 /build
 /build-tests
+/build-*
+
+# エディタ / ツールの生成物
+compile_commands.json
+/.cache
+/.vscode
+*.swp

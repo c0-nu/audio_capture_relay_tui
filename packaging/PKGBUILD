@@ -1,0 +1,40 @@
+# Maintainer: c0_nu <124735564+c0-nu@users.noreply.github.com>
+pkgname=audio-capture-relay-git
+_pkgname=audio_capture_relay
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="TUI relay that plays a PulseAudio/PipeWire capture source back as its own stream, with a braille waveform"
+arch=('x86_64' 'aarch64')
+url="https://github.com/c0-nu/audio_capture_relay_tui"
+license=('MIT')
+depends=('libpulse' 'ncurses')
+makedepends=('cmake' 'ninja' 'git' 'pkgconf')
+provides=("${_pkgname}")
+conflicts=("${_pkgname}")
+source=("git+${url}.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "${srcdir}/audio_capture_relay_tui"
+    # 直近のタグが無いうちは 0.1.0.r<コミット数>.g<hash> になる。
+    git describe --long --tags 2>/dev/null | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g' \
+        || printf "0.1.0.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+    cmake -S "${srcdir}/audio_capture_relay_tui" -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr
+    cmake --build build
+}
+
+check() {
+    cmake -S "${srcdir}/audio_capture_relay_tui" -B build-tests -G Ninja \
+        -DACR_BUILD_APP=OFF -DACR_BUILD_TESTS=ON
+    cmake --build build-tests
+    ctest --test-dir build-tests --output-on-failure
+}
+
+package() {
+    DESTDIR="${pkgdir}" cmake --install build
+}

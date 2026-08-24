@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: domain tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build g++
+      # domain/ は標準ライブラリしか使わないので、PulseAudio も ncurses も入れずに回せる。
+      - name: Configure
+        run: cmake -S . -B build-tests -G Ninja -DACR_BUILD_APP=OFF -DACR_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build-tests
+      - name: Test
+        run: ctest --test-dir build-tests --output-on-failure
+
+  build:
+    name: build (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu 24.04
+            image: ubuntu:24.04
+            deps: >-
+              apt-get update &&
+              DEBIAN_FRONTEND=noninteractive apt-get install -y
+              build-essential cmake ninja-build pkg-config libpulse-dev libncurses-dev
+          - name: Debian 12
+            image: debian:12
+            deps: >-
+              apt-get update &&
+              DEBIAN_FRONTEND=noninteractive apt-get install -y
+              build-essential cmake ninja-build pkg-config libpulse-dev libncurses-dev
+          - name: Fedora 41
+            image: fedora:41
+            deps: >-
+              dnf install -y gcc-c++ cmake ninja-build pkgconf-pkg-config
+              pulseaudio-libs-devel ncurses-devel
+          - name: Arch
+            image: archlinux:latest
+            deps: >-
+              pacman -Syu --noconfirm --needed
+              base-devel cmake ninja pkgconf libpulse ncurses
+          - name: Alpine (musl)
+            image: alpine:3.20
+            deps: >-
+              apk add --no-cache build-base cmake ninja-build pkgconf
+              pulseaudio-dev ncurses-dev
+    steps:
+      - uses: actions/checkout@v4
+      # actions/checkout はホスト側で済ませ、ビルドだけコンテナで回す。
+      # コンテナ内で checkout を動かすと node の ABI(特に musl)で嵌まるため。
+      - name: Build on ${{ matrix.name }}
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "${{ matrix.image }}" sh -euc '
+            ${{ matrix.deps }}
+            cmake -S . -B build-ci -G Ninja
+            cmake --build build-ci
+            ./build-ci/audio_capture_relay --version
+          '

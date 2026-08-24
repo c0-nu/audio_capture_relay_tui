@@ -1,213 +1,230 @@
 # AudioCaptureRelay TUI
 
-任意の PulseAudio / PipeWire-Pulse capture source を読み取り、このアプリ自身の再生ストリームとして出力する最小限の中継ツールです。
+[日本語版 README](README.ja.md)
 
-この版では `top` / `htop` のような1画面TUIを追加し、Unicode点字文字で波形を表示します。
+A small relay that reads any PulseAudio / PipeWire-Pulse capture source and plays it
+back as **its own playback stream**, with a single-screen `top`-style TUI that draws
+the waveform in Unicode braille characters.
 
-用途の一例: Discord などの画面共有は「アプリの再生音」を拾うので、`.monitor` source を
-このツールで中継して**自分の再生ストリームとして出し直す**と、共有相手に音を届けられます。
+Why relay audio back to yourself? Screen sharing in Discord and similar apps picks up
+*application playback*, not capture sources. Relaying a `.monitor` source through this
+tool turns it into a normal playback stream, so the people you are sharing with can
+hear it.
 
-## 依存関係
+```
+Latency: 60ms (ring 34 / out 24)   drift 0ms   underruns 0
+⠀⠀⢀⣀⣤⣶⣿⣿⣷⣶⣤⣀⡀⠀⠀⠀⠀⢀⣠⣴⣾⣿⣿⣶⣄⡀⠀⠀
+```
+
+## Requirements
+
+- A PulseAudio-compatible server (PulseAudio, or PipeWire with `pipewire-pulse`)
+- C++20 compiler, CMake ≥ 3.16
+- `libpulse`, `ncursesw`
 
 Arch / CachyOS:
 
 ```bash
-sudo pacman -S --needed base-devel cmake ninja pkgconf libpulse ncurses pavucontrol
+sudo pacman -S --needed base-devel cmake ninja pkgconf libpulse ncurses
 ```
 
-Ubuntu / Debian:
+Debian / Ubuntu:
 
 ```bash
 sudo apt install build-essential cmake ninja-build pkg-config libpulse-dev libncursesw5-dev
 ```
 
-## ビルド
+Fedora:
+
+```bash
+sudo dnf install gcc-c++ cmake ninja-build pkgconf-pkg-config pulseaudio-libs-devel ncurses-devel
+```
+
+## Build
 
 ```bash
 cmake -S . -B build -G Ninja
 cmake --build build
 ```
 
-## 使い方
-
-source一覧:
+Install (optional):
 
 ```bash
-./build/audio_capture_relay --list
+sudo cmake --install build
 ```
 
-デフォルトsourceを使う:
+Arch users can build a package instead:
 
 ```bash
-./build/audio_capture_relay
+cd packaging && makepkg -si
 ```
 
-番号で選択:
+## Usage
 
 ```bash
-./build/audio_capture_relay --source 0
+./build/audio_capture_relay --list          # list capture sources and output sinks
+./build/audio_capture_relay                 # use the default source
+./build/audio_capture_relay --source 0      # by index
+./build/audio_capture_relay --source monitor # by exact name or substring
+./build/audio_capture_relay --select        # pick interactively
+./build/audio_capture_relay --sink hdmi     # choose the output sink
+./build/audio_capture_relay --no-tui        # one-line status instead of the TUI
+./build/audio_capture_relay --no-waveform   # start with the waveform hidden
 ```
 
-部分一致で選択:
-
-```bash
-./build/audio_capture_relay --source monitor
-```
-
-対話選択:
-
-```bash
-./build/audio_capture_relay --select
-```
-
-出力先sinkを選ぶ(省略時は既定のsink):
-
-```bash
-./build/audio_capture_relay --sink 1
-./build/audio_capture_relay --sink hdmi
-```
-
-`--list` はcapture sourceと出力sinkの両方を表示します。
-
-TUIなし:
-
-```bash
-./build/audio_capture_relay --no-tui
-```
-
-波形非表示で開始:
-
-```bash
-./build/audio_capture_relay --no-waveform
-```
-
-波形の描き方を選ぶ:
+Waveform drawing style:
 
 ```bash
 ./build/audio_capture_relay --waveform-style line
 ```
 
-| Style | 見た目 | 特徴 |
+| Style | Looks like | Trade-off |
 |---|---|---|
-| `envelope`(既定) | 各列の最小〜最大を塗る | 幅が狭くてもピークを取りこぼさない |
-| `line` | 各列から1点拾って繋ぐ | オシロスコープ風の細い線 |
+| `envelope` (default) | fills each column from its min to its max | never misses a peak, even in a narrow terminal |
+| `line` | picks one sample per column and joins them | thin oscilloscope-style trace |
 
-実行中に `s` でいつでも切り替えられます。
+Press `s` to switch at any time.
 
-## 実行中キー
+### Bluetooth sources
+
+Nothing special is needed. When a Bluetooth audio device is connected, the sound
+server exposes it as an ordinary source (`bluez_input.XX_XX_XX_XX_XX_XX.a2dp-source`
+for audio coming *from* a phone, or `bluez_output.XX_….monitor` for what is being
+sent to a headset), so it shows up in `--list` and can be selected with `--source`.
+
+## Keys
 
 | Key | Action |
 |---|---|
-| `q` | 終了 |
-| `+` / `-` | ソフトウェア音量変更 |
+| `q` | quit |
+| `+` / `-` | software volume |
 | `m` | mute / unmute |
-| `w` | 点字波形表示のon/off |
-| `s` | 波形の描き方切り替え (envelope / line) |
+| `w` | toggle the waveform |
+| `s` | waveform style (envelope / line) |
 | `p` or Space | pause / resume |
 
-## レイテンシが気になる人へ
+## Latency
 
-`--latency-ms`(既定 120)は **capture から実際に音が出るまでの合計**に対する目標です。
-AudioCaptureRelay 自身のバッファと、PulseAudio / PipeWire 側のキューの両方を見て、
-再生の消費量を少しずつ調整して合わせます。TUI の `Latency:` 行に内訳
-(`ring` = 自前のバッファ、`out` = サーバ側)が出ます。
+`--latency-ms` (default 120) targets the **total** delay from capture to audible
+output — both this program's own ring buffer and the queue held by the sound server.
+The TUI shows the split on the `Latency:` line (`ring` = ours, `out` = the server's).
 
-### まず試すもの
+### Start here
 
 ```bash
 ./build/audio_capture_relay --low-latency
 ```
 
-`--chunk-ms 5 --latency-ms 60` と同じです(明示した `--chunk-ms` / `--latency-ms` が優先)。
+Same as `--chunk-ms 5 --latency-ms 60`. An explicit `--chunk-ms` / `--latency-ms`
+still wins.
 
-### 効くのは `--latency-ms` より `--chunk-ms`
+### `--chunk-ms` matters more than `--latency-ms`
 
-チャンク長を詰めると、こちらが持つ予備もサーバ側に持たせる分も**両方**縮みます。
-実測(PipeWire-Pulse、いずれも 14〜90 秒運転。graph quantum は要求に応じて
-自動で 256 まで下がっている状態):
+Shortening the chunk shrinks **both** our own headroom and what the server holds.
+Measured on PipeWire-Pulse (runs of 14–90 s, graph quantum already down at 256):
 
-| 設定 | 実測レイテンシ | 内訳 ring / out |
+| Settings | Measured | ring / out |
 |---|---|---|
-| 既定(`--chunk-ms 20 --latency-ms 120`) | 約130ms | 36 / 80 |
+| default (`--chunk-ms 20 --latency-ms 120`) | ~121ms | 50 / 58 |
 | `--chunk-ms 10 --latency-ms 50` | 71ms | 20 / 41 |
-| `--low-latency`(chunk 5 / target 60) | 60ms(90秒で underrun 0) | 25 / 33 |
-| `--chunk-ms 5 --latency-ms 40` | 45〜50ms(60秒で underrun 1回) | 15 / 32 |
-| `--chunk-ms 5 --latency-ms 10`(下限要求) | 46ms(`floor` 表示) | — |
+| `--low-latency` (chunk 5 / target 60) | 60ms, 0 underruns in 90 s | 34 / 24 |
+| `--chunk-ms 5 --latency-ms 20` | 41ms (`floor` 37) | — |
 
-これに capture 側の 5〜8ms が加わります(表示には含まれません)。
+Add another 5–8 ms for the capture side, which is not included in the display.
 
-### それ以上下げたい場合 — quantum は既に下がっています
+### Going lower — the quantum is already down
 
-「PipeWire の quantum(既定 1024 = 21.3ms)を下げれば `out` が縮む」と思いがちですが、
-**このツールでは効きません。** PipeWire はクライアントが要求したレイテンシに合わせて
-quantum を動的に下げるので、`--low-latency` で走っている間はすでに 256(5.3ms)です。
+It is tempting to blame PipeWire's quantum (nominally 1024 = 21.3 ms), but lowering it
+does nothing here: **PipeWire already reduces the quantum to match the latency a client
+asks for**, so while `--low-latency` is running it is 256 (5.3 ms) without any tuning.
 
 ```bash
 pw-top -b -n 3
 ```
 
-`AudioCaptureRelay` と出力先 sink の `QUANT` 列が 256 になっているはずです
-(`clock.force-quantum` は 0 のまま)。実測でも `clock.force-quantum 256` を
-強制した前後で合計レイテンシは 60ms、`out` も 32〜35ms で変わりませんでした。
+The `QUANT` column for `AudioCaptureRelay` and for the output sink should both read 256,
+with `clock.force-quantum` still 0. Forcing `clock.force-quantum 256` measurably changed
+nothing (total stayed at 60 ms, `out` at 32–35 ms).
 
-残る `out` の 30ms 前後は **sink の ALSA 側のバッファ**です。デバイスごとの値は:
+What is left in `out` is the **sink's ALSA buffer**:
 
 ```bash
 pw-dump | grep -A2 api.alsa.period-size
 ```
 
-実測環境の USB CODEC は `period-size 512` + `headroom 512` = 1024 フレーム ≒ 21.3ms で、
-これは graph quantum とは別枠なので force-quantum では動きません。
-
-ここを削るには WirePlumber でデバイス個別に `api.alsa.headroom` を下げます。
-`~/.config/wireplumber/wireplumber.conf.d/51-alsa-headroom.conf` に:
+The USB CODEC used for these measurements reported `period-size 512` + `headroom 512`
+= 1024 frames ≒ 21.3 ms. That is separate from the graph quantum, so `force-quantum`
+cannot touch it. To shrink it, override `api.alsa.headroom` per device in WirePlumber —
+`~/.config/wireplumber/wireplumber.conf.d/51-alsa-headroom.conf`:
 
 ```
 monitor.alsa.rules = [
   {
-    matches = [ { node.name = "<下げたい sink の node.name>" } ]
+    matches = [ { node.name = "<node.name of the sink>" } ]
     actions = { update-props = { api.alsa.headroom = 128 } }
   }
 ]
 ```
 
-`systemctl --user restart wireplumber` で反映(**全アプリの音が一度途切れます**)。
-戻すときはこのファイルを消して同じコマンド。
+Apply with `systemctl --user restart wireplumber` (**all audio cuts out briefly**).
+Delete the file and run the same command to revert.
 
-実測(USB CODEC、90 秒運転):
+Measured on that USB CODEC over 90 s:
 
-| | 変更前 | 変更後 |
+| | before | after |
 |---|---|---|
-| sink の ALSA 側 | period 512 + headroom 512 = 21.3ms | period 128 + headroom 256 = 8ms |
-| `--low-latency` | 60ms(out 32〜35) | 60ms(out 25〜28) |
-| `--latency-ms 20 --chunk-ms 5` | 44〜47ms(`floor` 42) | **41ms**(`floor` 37) |
+| sink's ALSA side | period 512 + headroom 512 = 21.3ms | period 128 + headroom 256 = 8ms |
+| `--low-latency` | 60ms (out 32–35) | 60ms (out 25–28) |
+| `--latency-ms 20 --chunk-ms 5` | 44–47ms (`floor` 42) | **41ms** (`floor` 37) |
 
-どちらも `underruns 0`。**`headroom = 128` と書いても実際に効いたのは 256** でした
-(PipeWire が period に合わせて調整する)。それ以上は書いても下がりません。
+Zero underruns either way. Note that **writing `headroom = 128` actually settled at 256** —
+PipeWire adjusts it to the period size, and it will not go below that.
 
-**永続設定**であり、削りすぎると xrun(プチノイズ)を招きます。デバイスによっては
-128 でも足りずに音が割れるので、少しずつ試してください。
+This is a **persistent system setting**, and cutting too deep invites xruns. Some devices
+distort at 128, so lower it in steps.
 
-### 下げると何が起きるか
+### What you give up
 
-バッファが薄くなるぶん、CPU が詰まったときに枯れやすくなります。枯れた分は数 ms で
-無音へフェードして埋める(`underruns` が増える)ので 1 回なら聞こえませんが、
-連続するようなら `--latency-ms` を上げてください。
+Thinner buffers starve more easily when the CPU stalls. A starved chunk fades to silence
+over a few milliseconds (and bumps `underruns`), which is inaudible once but should be
+answered by raising `--latency-ms` if it repeats.
 
-`pads` は「枯れてはいないが、ドリフト補正の都合で 1 チャンクに足りない分を
-埋めた」回数です。増えていても異常ではありません(1 フレーム程度の埋めが大半)。目標が実現不能なほど低い場合は
-実現できる一番浅い水位に切り替わり、`floor` として表示されます。
+`pads` counts chunks that were *not* starved but still needed a frame or two of filler
+because of drift correction. A nonzero value is normal. If the requested target is
+physically impossible, the tool settles at the shallowest level it can actually hold and
+displays it as `floor`.
 
-## 注意
+## Caveats
 
-`.monitor` source は「出力デバイスへ流れている音」をcaptureします。
+A `.monitor` source captures whatever is being played to that output device. Sending the
+relay back to the *same* device can therefore feed the tool its own output. Use `--sink`
+to pick a different one, or move the AudioCaptureRelay stream in `pavucontrol`.
 
-同じ出力デバイスへ再出力すると、AudioCaptureRelay自身の音を再度拾ってループする場合があります。その場合は `--sink` で別のsinkを指定するか、`pavucontrol` で AudioCaptureRelay の出力先を変更してください。
-
-null sinkを作る例:
+Creating a dedicated null sink:
 
 ```bash
 pactl load-module module-null-sink \
   sink_name=discord_share \
   sink_properties=device.description=DiscordShare
 ```
+
+## Development
+
+Tests cover `src/domain/` only — the pure half, which depends on nothing but the standard
+library. They build without PulseAudio or ncurses:
+
+```bash
+cmake -S . -B build-tests -G Ninja -DACR_BUILD_APP=OFF -DACR_BUILD_TESTS=ON
+cmake --build build-tests
+ctest --test-dir build-tests --output-on-failure
+```
+
+Catch2 v3 is used from the system if present, and fetched otherwise.
+
+Layering is one-directional: `main` → `app` / `adapters` → `domain`. `domain/` must never
+include `<pulse/*>`, `<ncurses.h>`, or `<iostream>`. See [CLAUDE.md](CLAUDE.md) for the
+full conventions (Japanese).
+
+## License
+
+MIT. See [LICENSE](LICENSE).

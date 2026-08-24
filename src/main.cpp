@@ -17,8 +17,8 @@
 
 int main(int argc, char** argv) {
     auto parsed = acr::parse_args(argc, argv);
-    if (!parsed) return 1;
-    const acr::Options opt = *parsed;
+    if (!parsed.options) return parsed.exit_code;
+    const acr::Options opt = *parsed.options;
 
     acr::PulseDeviceLister lister;
     std::string error;

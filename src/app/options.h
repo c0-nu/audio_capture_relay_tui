@@ -22,8 +22,16 @@ namespace acr {
     };
 
     void print_usage(const char* argv0);
+    void print_version();
 
-    // --help / 引数エラーのときは nullopt(メッセージは出力済み)。
-    std::optional<Options> parse_args(int argc, char** argv);
+    // 引数解析の結果。--help / --version は「走らせない」だけで正常終了なので、
+    // エラー(終了コード 2)と区別できるように終了コードも一緒に返す。
+    struct ParsedArgs {
+        std::optional<Options> options;  // 走らせるなら値が入る
+        int exit_code = 0;               // options が空のときに main が返す値
+    };
+
+    // メッセージは parse_args の中で出力済み。
+    ParsedArgs parse_args(int argc, char** argv);
 
 } // namespace acr
