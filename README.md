@@ -157,10 +157,36 @@ pw-dump | grep -A2 api.alsa.period-size
 ```
 
 実測環境の USB CODEC は `period-size 512` + `headroom 512` = 1024 フレーム ≒ 21.3ms で、
-これは graph quantum とは別枠なので force-quantum では動きません。ここを削るには
-WirePlumber でデバイス個別に `api.alsa.headroom` を下げることになりますが、
-**永続設定**な上に USB デバイスでは xrun(プチノイズ)を招きやすいので、
-下げるなら少しずつ試してください。
+これは graph quantum とは別枠なので force-quantum では動きません。
+
+ここを削るには WirePlumber でデバイス個別に `api.alsa.headroom` を下げます。
+`~/.config/wireplumber/wireplumber.conf.d/51-alsa-headroom.conf` に:
+
+```
+monitor.alsa.rules = [
+  {
+    matches = [ { node.name = "<下げたい sink の node.name>" } ]
+    actions = { update-props = { api.alsa.headroom = 128 } }
+  }
+]
+```
+
+`systemctl --user restart wireplumber` で反映(**全アプリの音が一度途切れます**)。
+戻すときはこのファイルを消して同じコマンド。
+
+実測(USB CODEC、90 秒運転):
+
+| | 変更前 | 変更後 |
+|---|---|---|
+| sink の ALSA 側 | period 512 + headroom 512 = 21.3ms | period 128 + headroom 256 = 8ms |
+| `--low-latency` | 60ms(out 32〜35) | 60ms(out 25〜28) |
+| `--latency-ms 20 --chunk-ms 5` | 44〜47ms(`floor` 42) | **41ms**(`floor` 37) |
+
+どちらも `underruns 0`。**`headroom = 128` と書いても実際に効いたのは 256** でした
+(PipeWire が period に合わせて調整する)。それ以上は書いても下がりません。
+
+**永続設定**であり、削りすぎると xrun(プチノイズ)を招きます。デバイスによっては
+128 でも足りずに音が割れるので、少しずつ試してください。
 
 ### 下げると何が起きるか
 

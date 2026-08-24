@@ -254,9 +254,12 @@ graph quantum とは別枠なので force-quantum では動かない。**「quan
 
 ### 残っている下げ代
 
-1. **WirePlumber でデバイス個別に `api.alsa.headroom` を下げる。** 実測環境では 512
-   (10.7ms)。ただし**永続設定**であり、USB デバイスでは xrun を招きやすい。
-   ツール側ではなく環境側の変更なので、やるなら本人の判断で。
+1. **済: WirePlumber で `api.alsa.headroom` を下げた。** USB CODEC が
+   period 512 + headroom 512(21.3ms)→ period 128 + headroom 256(8ms)になり、
+   `out` が 32〜35ms → 25〜28ms、`--latency-ms 20` の `floor` が 42ms → 37ms へ。
+   90 秒で underruns 0。設定は `~/.config/wireplumber/wireplumber.conf.d/` 
+   (**環境側の永続設定**。ツールのリポジトリには入っていない)。
+   `headroom = 128` と書いても実際は 256 に落ち着くので、**ここが底**。
 2. `PACE_SLACK_CHUNKS` / `min_ring_frames` を CLI から触れるようにするか(下記の未決事項)。
    quantum で話が変わる可能性は消えたので、**判断材料はもう揃っている**。
    chunk 5ms では slack を 4 -> 2 にしても実測 50ms のまま変わらなかった = ALSA 側が
