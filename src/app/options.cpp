@@ -24,6 +24,8 @@ namespace acr {
         << "  --no-tui               Print plain status instead of full-screen TUI.\n"
         << "  --no-waveform          Start with waveform hidden.\n"
         << "  --waveform-style STYLE  envelope (default) or line. Switchable at runtime with s.\n"
+        << "  --low-latency          Shorthand for --chunk-ms 5 --latency-ms 60 (default is about 130ms).\n"
+        << "                         Explicit --chunk-ms / --latency-ms still win.\n"
         << "  --help                 Show this help.\n";
     }
 
@@ -38,6 +40,12 @@ namespace acr {
 
     std::optional<Options> parse_args(int argc, char** argv) {
         Options opt;
+
+        // --low-latency はあくまで既定値の差し替え。明示された値のほうを常に優先する
+        // (指定順に依存させない)。
+        bool low_latency = false;
+        bool chunk_given = false;
+        bool latency_given = false;
 
         for (int i = 1; i < argc; ++i) {
             std::string a = argv[i];
@@ -77,12 +85,16 @@ namespace acr {
                 auto ms = parse_int(*v);
                 if (!ms) return invalid_value(a, *v);
                 opt.relay.latency_ms = std::clamp(*ms, 20, 2000);
+                latency_given = true;
             } else if (a == "--chunk-ms") {
                 auto v = need_value(a);
                 if (!v) return std::nullopt;
                 auto ms = parse_int(*v);
                 if (!ms) return invalid_value(a, *v);
                 opt.relay.chunk_ms = std::clamp(*ms, 5, 200);
+                chunk_given = true;
+            } else if (a == "--low-latency") {
+                low_latency = true;
             } else if (a == "--no-tui") {
                 opt.tui = false;
             } else if (a == "--no-waveform") {
@@ -101,6 +113,11 @@ namespace acr {
                 print_usage(argv[0]);
                 return std::nullopt;
             }
+        }
+
+        if (low_latency) {
+            if (!chunk_given) opt.relay.chunk_ms = LOW_LATENCY_CHUNK_MS;
+            if (!latency_given) opt.relay.latency_ms = LOW_LATENCY_TARGET_MS;
         }
 
         if (!opt.tui) opt.waveform = false;

@@ -4,6 +4,9 @@
 
 この版では `top` / `htop` のような1画面TUIを追加し、Unicode点字文字で波形を表示します。
 
+用途の一例: Discord などの画面共有は「アプリの再生音」を拾うので、`.monitor` source を
+このツールで中継して**自分の再生ストリームとして出し直す**と、共有相手に音を届けられます。
+
 ## 依存関係
 
 Arch / CachyOS:
@@ -102,17 +105,69 @@ TUIなし:
 | `s` | 波形の描き方切り替え (envelope / line) |
 | `p` or Space | pause / resume |
 
-## レイテンシ
+## レイテンシが気になる人へ
 
 `--latency-ms`(既定 120)は **capture から実際に音が出るまでの合計**に対する目標です。
 AudioCaptureRelay 自身のバッファと、PulseAudio / PipeWire 側のキューの両方を見て、
-再生の消費量を少しずつ調整して合わせます。
+再生の消費量を少しずつ調整して合わせます。TUI の `Latency:` 行に内訳
+(`ring` = 自前のバッファ、`out` = サーバ側)が出ます。
 
-TUI の `Latency:` 行に内訳(`ring` = 自前のバッファ、`out` = サーバ側)が出ます。
+### まず試すもの
 
-サーバとデバイスが抱える分(`out`、環境によりますが 70ms 前後)より下には**下げられません**。
-目標がそれを下回る場合は実現できる一番浅い水位に切り替わり、`floor` として表示されます
-(例: `--latency-ms 20` でも実際は 120ms 前後)。`--latency-ms` を上げれば素直に増えます。
+```bash
+./build/audio_capture_relay --low-latency
+```
+
+`--chunk-ms 5 --latency-ms 60` と同じです(明示した `--chunk-ms` / `--latency-ms` が優先)。
+
+### 効くのは `--latency-ms` より `--chunk-ms`
+
+チャンク長を詰めると、こちらが持つ予備もサーバ側に持たせる分も**両方**縮みます。
+実測(PipeWire-Pulse、いずれも 14〜90 秒運転。graph quantum は要求に応じて
+自動で 256 まで下がっている状態):
+
+| 設定 | 実測レイテンシ | 内訳 ring / out |
+|---|---|---|
+| 既定(`--chunk-ms 20 --latency-ms 120`) | 約130ms | 36 / 80 |
+| `--chunk-ms 10 --latency-ms 50` | 71ms | 20 / 41 |
+| `--low-latency`(chunk 5 / target 60) | 60ms(90秒で underrun 0) | 25 / 33 |
+| `--chunk-ms 5 --latency-ms 40` | 45〜50ms(60秒で underrun 1回) | 15 / 32 |
+| `--chunk-ms 5 --latency-ms 10`(下限要求) | 46ms(`floor` 表示) | — |
+
+これに capture 側の 5〜8ms が加わります(表示には含まれません)。
+
+### それ以上下げたい場合 — quantum は既に下がっています
+
+「PipeWire の quantum(既定 1024 = 21.3ms)を下げれば `out` が縮む」と思いがちですが、
+**このツールでは効きません。** PipeWire はクライアントが要求したレイテンシに合わせて
+quantum を動的に下げるので、`--low-latency` で走っている間はすでに 256(5.3ms)です。
+
+```bash
+pw-top -b -n 3
+```
+
+`AudioCaptureRelay` と出力先 sink の `QUANT` 列が 256 になっているはずです
+(`clock.force-quantum` は 0 のまま)。実測でも `clock.force-quantum 256` を
+強制した前後で合計レイテンシは 60ms、`out` も 32〜35ms で変わりませんでした。
+
+残る `out` の 30ms 前後は **sink の ALSA 側のバッファ**です。デバイスごとの値は:
+
+```bash
+pw-dump | grep -A2 api.alsa.period-size
+```
+
+実測環境の USB CODEC は `period-size 512` + `headroom 512` = 1024 フレーム ≒ 21.3ms で、
+これは graph quantum とは別枠なので force-quantum では動きません。ここを削るには
+WirePlumber でデバイス個別に `api.alsa.headroom` を下げることになりますが、
+**永続設定**な上に USB デバイスでは xrun(プチノイズ)を招きやすいので、
+下げるなら少しずつ試してください。
+
+### 下げると何が起きるか
+
+バッファが薄くなるぶん、CPU が詰まったときに枯れやすくなります。枯れた分は数 ms で
+無音へフェードして埋める(`underruns` が増える)ので 1 回なら聞こえませんが、
+連続するようなら `--latency-ms` を上げてください。目標が実現不能なほど低い場合は
+実現できる一番浅い水位に切り替わり、`floor` として表示されます。
 
 ## 注意
 

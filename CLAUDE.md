@@ -3,6 +3,10 @@
 PulseAudio / PipeWire-Pulse の capture source を読み取り、自分自身の再生ストリームとして
 出し直す中継ツール + ncurses の 1 画面 TUI。C++20 / CMake / 単一バイナリ。
 
+**主な用途は Discord などの画面共有に音を乗せること。** 画面共有は「アプリの再生音」を
+拾うので、`.monitor` source を中継して自分の再生ストリームとして出し直す、という形を取る。
+コンソールで波形を眺めたい、という動機もある。
+
 ## 必読(常設コンテキスト)
 
 実装前に必ず読み、以降すべての作業でこれに従うこと。
@@ -205,6 +209,11 @@ S16LE / 48000Hz / 2ch 固定(`domain/audio_format.h`)。可変にする予定は
 
 ### PulseAudio / ncurses の扱い
 
+- **再生は `pa_simple` のまま。`pa_stream`(非同期 API)へ移さないこと。**
+  以前 `pa_stream` にしたとき、Discord の画面共有に音が乗らなくなったことがある
+  (2026-08-24 に利用者から共有された経験。原因は未特定)。低レイテンシ化のために
+  API を変えたくなる場面があるが、**実際の画面共有で拾われるか確認するまでやらない**。
+  レイテンシは `--chunk-ms` を詰めればほぼ足りる(README 参照)。
 - `pa_*` / ncurses の呼び出しは `adapters/` の中だけ。`domain/` の関数シグネチャに
   ライブラリの型を出さない。
 - **エラーを `std::cerr` に直接書かないこと。** TUI 表示中は画面が壊れる。
@@ -229,7 +238,38 @@ S16LE / 48000Hz / 2ch 固定(`domain/audio_format.h`)。可変にする予定は
 
 ---
 
+## 次の一手(2026-08-24 時点)
+
+### 済: quantum を下げても縮まない(実測で決着)
+
+`clock.force-quantum 256` を強制した前後で、`--low-latency` の合計は 60ms、`out` は
+32〜35ms のまま変わらなかった。理由は **PipeWire が要求レイテンシに応じて quantum を
+自動で下げており、強制する前からすでに 256 だったから**(`pw-top -b -n 3` の QUANT 列で
+`AudioCaptureRelay` と sink がどちらも 256、`clock.force-quantum` は 0)。
+
+残る `out` の 30ms 前後は **sink の ALSA 側**(実測環境の USB CODEC は
+`period-size 512` + `headroom 512` = 1024 フレーム ≒ 21.3ms、`pw-dump` で確認できる)。
+graph quantum とは別枠なので force-quantum では動かない。**「quantum を下げれば縮む」と
+再提案しないこと。**
+
+### 残っている下げ代
+
+1. **WirePlumber でデバイス個別に `api.alsa.headroom` を下げる。** 実測環境では 512
+   (10.7ms)。ただし**永続設定**であり、USB デバイスでは xrun を招きやすい。
+   ツール側ではなく環境側の変更なので、やるなら本人の判断で。
+2. `PACE_SLACK_CHUNKS` / `min_ring_frames` を CLI から触れるようにするか(下記の未決事項)。
+   quantum で話が変わる可能性は消えたので、**判断材料はもう揃っている**。
+   chunk 5ms では slack を 4 -> 2 にしても実測 50ms のまま変わらなかった = ALSA 側が
+   支配的、というのが結論。触れるようにしても実利は薄い。
+3. `feat/low-latency`(`--low-latency` プリセット)は **main へ未マージ**。
+
+---
+
 ## 未決事項(勝手に決めない)
+
+- `PACE_SLACK_CHUNKS`(4)と `min_ring_frames`(2 チャンク)を CLI から触れるようにするか。
+  いまは定数。chunk 5ms では実測でサーバ側の下限(約 30ms = sink の ALSA バッファ)が
+  支配的なので、緩めても縮まなかった(2 に下げて実測 50ms、4 のままと同じ)。
 
 - 出力先 sink は起動時にしか選べない。実行中に切り替えられるようにするか。
 - 打ち切り(3 秒)のあと、再接続を試みるようにするか。いまは終了するだけ。
