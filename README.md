@@ -1,5 +1,9 @@
 # AudioCaptureRelay TUI
 
+> ⚠️ **This code was written by an AI (Claude, by Anthropic)** — the design decisions
+> too, not just the typing. It has been tested by ear on real hardware, but it has not
+> been reviewed line by line by a human. See [How this was built](#how-this-was-built).
+
 [日本語版 README](README.ja.md)
 
 A small relay that reads any PulseAudio / PipeWire-Pulse capture source and plays it
@@ -239,6 +243,28 @@ Catch2 v3 is used from the system if present, and fetched otherwise.
 Layering is one-directional: `main` → `app` / `adapters` → `domain`. `domain/` must never
 include `<pulse/*>`, `<ncurses.h>`, or `<iostream>`. See [CLAUDE.md](CLAUDE.md) for the
 full conventions (Japanese).
+
+## How this was built
+
+The C++ in this repository was written by Claude (Anthropic), across a series of
+conversations. That includes the design decisions — the layering, the drift-correction
+scheme, the pacing logic — not just the code that implements them.
+
+What is actually mine, as the owner of this repository:
+
+- **The conventions.** `CLAUDE.md` is based on a coding standard I wrote. But it was
+  Claude that interpreted it and decided what it meant in practice, case by case.
+- **Listening to the result.** Every latency figure in this README was measured on my
+  own machine, and the calls about whether the audio was actually *right* — no clicks,
+  no dropouts, picked up correctly by a screen share — are mine.
+
+What is **not** mine is a careful reading of the code. I have not done one. The tests
+under `tests/` cover `src/domain/` and pass, and the tool has been run for long stretches
+on PipeWire-Pulse under Arch/CachyOS, but that is testing, not review.
+
+So please **read the code yourself before running it on anything you care about.** It
+runs a real-time audio thread and talks directly to your sound server. It is offered as
+something that works for me, not as something a human has audited.
 
 ## License
 

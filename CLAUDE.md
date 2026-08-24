@@ -350,6 +350,15 @@ graph quantum とは別枠なので force-quantum では動かない。**「quan
 
 ## 作業の進め方(設計規約ではありません)
 
+### コミットには Co-Authored-By を付ける
+
+AI が書いていることを隠さない方針(2026-08-24 に決定)。コミットメッセージの末尾に
+`Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>` を入れること。
+README.md / README.ja.md の末尾にも同趣旨の節がある(免責込み)ので、
+**分担の書きぶりを変えたくなったら両方を揃えること**。
+
+過去のコミットへは遡って付けない(履歴の書き換えになるため)。
+
 ### compact のタイミングは Claude 側から提案する
 
 `/compact` を実行できるのは人間だけなので**決めるのはそちら**ですが、**言い出すのは Claude の役目**。
