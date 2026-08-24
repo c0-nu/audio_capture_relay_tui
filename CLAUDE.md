@@ -266,11 +266,12 @@ S16LE / 48000Hz / 2ch 固定(`domain/audio_format.h`)。可変にする予定は
 **「PulseAudio の中継ツール」から「TUI のオーディオ系ツール」へ広げる。** 本人の意向。
 順序は下記。**上から順にやること**(理由も一緒に書いてあるので、飛ばす前に読む)。
 
-1. **済: OSS 公開の下ごしらえ** … MIT / `--version` / `cmake --install` /
+1. **済: OSS 公開(2026-08-24 に public 化)** … MIT / `--version` / `cmake --install` /
    英語 README(`README.ja.md` が日本語) / GitHub Actions / `packaging/PKGBUILD`。
-   公開先は `github.com/c0-nu/audio_capture_relay_tui`(予定)。
+   公開先は https://github.com/c0-nu/audio_capture_relay_tui 。
    リポジトリ名は**当面このまま**。方向が固まってから rename する(GitHub が
    リダイレクトを張るので急がない)。
+   **履歴の書き換えはもうできない**(公開前に旧メール・旧パスは除去済み)。
 2. **済: `--no-relay`** … 中継せず取り込んで表示するだけ。
 3. **ビジュアライザを内蔵で 2〜3 個増やす** … spectrum(FFT)/ オシロ / Lissajous など。
    **プラグイン API を先に切らないこと。** 今の `WaveHistory` は min/max/last の
@@ -283,6 +284,23 @@ S16LE / 48000Hz / 2ch 固定(`domain/audio_format.h`)。可変にする予定は
    `libsndfile` は LGPL、`ffmpeg` は LGPL/GPL なのでライセンスが動く)。
    **一番の作業はリサンプラ**(ファイルは 44.1kHz が多いが、内部は 48kHz 固定)。
 6. **オーディオフィルタ**(やらない可能性もある)… **既定は無効**。遅延が乗るため。
+
+### 移植性の現状(2026-08-24 実測、CI)
+
+`.github/workflows/ci.yml` が push ごとに回る。**Ubuntu 24.04 / Debian 12 / Fedora 41 /
+Arch / Alpine 3.20(musl)の 5 つでビルドが通る。** ソースは無改変で musl に乗った。
+`domain` のテストは別ジョブで走る(PulseAudio も ncurses も要らない)。
+
+- checkout はホスト側で済ませ、ビルドだけ `docker run` に渡す。コンテナ内で
+  `actions/checkout` を動かすと node の ABI(特に musl)で嵌まる。
+- **Alpine の `ninja-build` は `/usr/bin/ninja` を置かない。** `ninja` という名前は
+  `ninja-is-really-ninja` が張る symlink なので、`-G Ninja` を使うなら両方要る。
+  片方だけだと `apk add` は成功するのに configure だけが
+  `CMAKE_MAKE_PROGRAM is not set` で落ちる(`CMAKE_CXX_COMPILER not set` はその巻き添え)。
+- Catch2 は `v3.7.1` に固定してある(`CMakeLists.txt`)。放置しても腐らない。
+- **CI に定期実行は付けていない。** GitHub は 60 日 push が無いと scheduled workflow を
+  無効化するので、長期放置には効かないため。久しぶりに触るときは、まず空 push か
+  `workflow_dispatch` で現況を見ること。
 
 ### プラグインは 2 系統に分けること(Visualizer と Filter を同じ API に載せない)
 
