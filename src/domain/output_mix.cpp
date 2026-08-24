@@ -18,11 +18,12 @@ namespace acr {
 
     } // namespace
 
-    void assemble_output(std::vector<std::int16_t>& output,
-                         const std::vector<std::int16_t>& popped,
-                         int chunk_frames,
-                         PaddingState& pad) {
-        if (chunk_frames <= 0) return;
+    FillResult assemble_output(std::vector<std::int16_t>& output,
+                               const std::vector<std::int16_t>& popped,
+                               int chunk_frames,
+                               PaddingState& pad) {
+        FillResult result;
+        if (chunk_frames <= 0) return result;
 
         const std::size_t chunk_samples = static_cast<std::size_t>(chunk_frames) * CHANNELS;
         const std::size_t popped_frames = popped.size() / CHANNELS;
@@ -47,15 +48,27 @@ namespace acr {
         }
 
         // 直前まで埋めていたなら、戻ってきた音を立ち上げる。
+        //
+        // ランプ長は「埋め終わりに実際どこまで落ちていたか」に比例させること。
+        // 固定長にすると、ドリフト補正で 1 フレームだけ埋めた(= まったく減衰
+        // していない)場合にも 1ms のランプが掛かり、**何ともない実音声に穴を
+        // 空ける**。実測で --low-latency では毎秒 2 回ここを踏んでいて、それが
+        // プチノイズの正体だった。枯れが 0 まで落ちきった場合は resume_gain が
+        // 0 になり、従来どおり PAD_RECOVER_FRAMES 全部を使う。
         if (pad.starved_frames > 0 && real_frames > 0) {
-            const std::size_t ramp = std::min<std::size_t>(static_cast<std::size_t>(PAD_RECOVER_FRAMES), real_frames);
+            const float resume_gain = starve_gain(pad.starved_frames);
+            const std::size_t ramp = std::min<std::size_t>(
+                static_cast<std::size_t>(std::lround(PAD_RECOVER_FRAMES * (1.0f - resume_gain))),
+                real_frames);
             for (std::size_t f = 0; f < ramp; ++f) {
                 const float t = static_cast<float>(f + 1) / static_cast<float>(ramp + 1);
+                const float gain = resume_gain + (1.0f - resume_gain) * t;
                 for (int ch = 0; ch < CHANNELS; ++ch) {
                     std::size_t i = f * CHANNELS + static_cast<std::size_t>(ch);
-                    output[i] = static_cast<std::int16_t>(std::lround(static_cast<float>(output[i]) * t));
+                    output[i] = static_cast<std::int16_t>(std::lround(static_cast<float>(output[i]) * gain));
                 }
             }
+            result.recovered_frames = static_cast<int>(ramp);
         }
 
         if (real_frames > 0) {
@@ -71,7 +84,9 @@ namespace acr {
             output[f * CHANNELS + 1] = static_cast<std::int16_t>(std::lround(static_cast<float>(pad.last_r) * gain));
         }
 
-        pad.starved_frames += static_cast<int>(static_cast<std::size_t>(chunk_frames) - real_frames);
+        result.padded_frames = static_cast<int>(static_cast<std::size_t>(chunk_frames) - real_frames);
+        pad.starved_frames += result.padded_frames;
+        return result;
     }
 
     void apply_volume(std::vector<std::int16_t>& output, bool paused, bool muted, float volume) {

@@ -36,6 +36,7 @@ namespace acr {
                 : "")
             << " drift=" << st.drift_ms.load() << "ms"
             << " underruns=" << st.underruns.load()
+            << " pads=" << st.pads.load()
             << " overflow_trims=" << st.overflow_trims.load()
             << "        "
             << std::flush;

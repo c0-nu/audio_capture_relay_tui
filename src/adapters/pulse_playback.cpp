@@ -155,7 +155,9 @@ namespace acr {
             auto popped = st.ring.pop(static_cast<std::size_t>(decision.consume_frames), popped_buffer);
             if (popped.underrun) st.underruns.fetch_add(1);
 
-            assemble_output(output, popped_buffer, chunk_frames, pad);
+            const auto fill = assemble_output(output, popped_buffer, chunk_frames, pad);
+            // 枯れていないのに埋めた = ドリフト補正が 1 チャンク未満しか消費しなかった。
+            if (!popped.underrun && fill.padded_frames > 0) st.pads.fetch_add(1);
             apply_volume(output, st.paused.load(), st.muted.load(), st.volume.load());
 
             if (pa_simple_write(play, output.data(), output.size() * sizeof(int16_t), &error) < 0) {

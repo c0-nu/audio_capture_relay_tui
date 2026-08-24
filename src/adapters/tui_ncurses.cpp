@@ -148,6 +148,7 @@ namespace acr {
             << " + out " << frames_to_ms(static_cast<double>(out_frames)) << ")"
             << " drift " << (drift_ms >= 0 ? "+" : "") << drift_ms << "ms"
             << " | underruns " << st.underruns.load()
+            << " | pads " << st.pads.load()
             << " | overflow trims " << st.overflow_trims.load();
             draw_line(row++, cols, line.str());
 

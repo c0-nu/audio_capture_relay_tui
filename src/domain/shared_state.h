@@ -44,6 +44,9 @@ namespace acr {
         std::atomic<bool> raised_target{false};                // 要求値では届かず押し上げた
         std::atomic<std::int64_t> drift_ms{0};                 // signed: +too much buffered, -starving
         std::atomic<std::uint64_t> underruns{0};               // times playback ran out of buffered audio
+        // 枯れてはいないが、ドリフト補正で 1 チャンク未満しか消費せず埋めた回数。
+        // underruns には出ないので、これが無いと「健全に見えるのに音が削れる」状態に気付けない。
+        std::atomic<std::uint64_t> pads{0};
         std::atomic<std::uint64_t> overflow_trims{0};          // times the ring buffer hit its safety-net cap
 
         std::atomic<float> volume{1.0f};

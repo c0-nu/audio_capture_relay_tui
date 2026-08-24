@@ -134,3 +134,65 @@ TEST_CASE("apply_volume は範囲を超えない", "[output]") {
     apply_volume(output, false, false, 4.0f);
     for (auto s : output) CHECK(s == 32767);
 }
+
+// --- 立ち上げランプの長さは「実際に減衰した分」に比例する ---
+//
+// ドリフト補正で 1 チャンク未満しか消費しないと、足りない分は埋め込みで埋まる。
+// ここで固定長のランプを掛けると、枯れてもいない実音声に穴が空く(実測で
+// --low-latency 時に毎秒 2 回踏んでいた。プチノイズの原因)。
+
+TEST_CASE("1 フレームだけ埋めた次のチャンクは削らない", "[output]") {
+    auto output = zeroed_output();
+    PaddingState pad;
+
+    assemble_output(output, constant(CHUNK, 10000), CHUNK, pad);
+
+    // 補正で 1 フレームだけ少なく消費した(リングは枯れていない)。
+    const auto fill = assemble_output(output, constant(CHUNK - 1, 10000), CHUNK, pad);
+    CHECK(fill.padded_frames == 1);
+    REQUIRE(pad.starved_frames == 1);
+
+    // 次は全部実音声。1 フレーム分しか減衰していないのだから、ほぼ素通しのはず。
+    const auto next = assemble_output(output, constant(CHUNK, 10000), CHUNK, pad);
+    CHECK(next.recovered_frames == 0);
+    CHECK(output.front() == 10000);
+    for (auto s : output) CHECK(s == 10000);
+}
+
+TEST_CASE("少しだけ埋めたときのランプは短い", "[output]") {
+    auto output = zeroed_output();
+    PaddingState pad;
+
+    assemble_output(output, constant(CHUNK, 10000), CHUNK, pad);
+    assemble_output(output, constant(CHUNK - PAD_FADE_FRAMES / 2, 10000), CHUNK, pad);
+    REQUIRE(pad.starved_frames == PAD_FADE_FRAMES / 2);
+
+    // 半分まで落ちたのだから、ランプも半分程度で足りる。
+    const auto next = assemble_output(output, constant(CHUNK, 10000), CHUNK, pad);
+    CHECK(next.recovered_frames > 0);
+    CHECK(next.recovered_frames < PAD_RECOVER_FRAMES);
+    CHECK(output.front() > 10000 / 3);      // 落ちきる前から立ち上げる
+}
+
+TEST_CASE("落ちきってからの復帰は従来どおり全長のランプ", "[output]") {
+    auto output = zeroed_output();
+    PaddingState pad;
+
+    assemble_output(output, constant(CHUNK, 5000), CHUNK, pad);
+    assemble_output(output, {}, CHUNK, pad);            // 1 チャンクまるごと枯れる
+    REQUIRE(pad.starved_frames >= PAD_FADE_FRAMES);     // 0 まで落ちきっている
+
+    const auto next = assemble_output(output, constant(CHUNK, 5000), CHUNK, pad);
+    CHECK(next.recovered_frames == PAD_RECOVER_FRAMES);
+    CHECK(output.front() < 5000);
+    CHECK(output[static_cast<std::size_t>(PAD_RECOVER_FRAMES) * CHANNELS] == 5000);
+}
+
+TEST_CASE("埋めた分は FillResult に出る", "[output]") {
+    auto output = zeroed_output();
+    PaddingState pad;
+
+    CHECK(assemble_output(output, constant(CHUNK, 100), CHUNK, pad).padded_frames == 0);
+    CHECK(assemble_output(output, constant(100, 100), CHUNK, pad).padded_frames == CHUNK - 100);
+    CHECK(assemble_output(output, {}, CHUNK, pad).padded_frames == CHUNK);
+}
