@@ -123,7 +123,8 @@ AudioCaptureRelay 自身のバッファと、PulseAudio / PipeWire 側のキュ�
 ### 効くのは `--latency-ms` より `--chunk-ms`
 
 チャンク長を詰めると、こちらが持つ予備もサーバ側に持たせる分も**両方**縮みます。
-実測(PipeWire, quantum 1024 = 21.3ms、いずれも 14〜90 秒運転):
+実測(PipeWire-Pulse、いずれも 14〜90 秒運転。graph quantum は要求に応じて
+自動で 256 まで下がっている状態):
 
 | 設定 | 実測レイテンシ | 内訳 ring / out |
 |---|---|---|
@@ -135,21 +136,31 @@ AudioCaptureRelay 自身のバッファと、PulseAudio / PipeWire 側のキュ�
 
 これに capture 側の 5〜8ms が加わります(表示には含まれません)。
 
-### それ以上下げたい場合
+### それ以上下げたい場合 — quantum は既に下がっています
 
-残りはほぼ **PipeWire の quantum**(既定 1024 = 21.3ms)です。sink がこの 1〜2 個分を
-抱えるので、`out` の 30ms 前後はこれが正体です。
-
-```bash
-pw-metadata -n settings 0 clock.force-quantum 256
-```
+「PipeWire の quantum(既定 1024 = 21.3ms)を下げれば `out` が縮む」と思いがちですが、
+**このツールでは効きません。** PipeWire はクライアントが要求したレイテンシに合わせて
+quantum を動的に下げるので、`--low-latency` で走っている間はすでに 256(5.3ms)です。
 
 ```bash
-pw-metadata -n settings 0 clock.force-quantum 0
+pw-top -b -n 3
 ```
 
-**全アプリに効く設定**で、負荷が高い環境では他のアプリごと音が途切れます。戻すのは
-2 つ目のコマンド(再起動でも戻ります)。
+`AudioCaptureRelay` と出力先 sink の `QUANT` 列が 256 になっているはずです
+(`clock.force-quantum` は 0 のまま)。実測でも `clock.force-quantum 256` を
+強制した前後で合計レイテンシは 60ms、`out` も 32〜35ms で変わりませんでした。
+
+残る `out` の 30ms 前後は **sink の ALSA 側のバッファ**です。デバイスごとの値は:
+
+```bash
+pw-dump | grep -A2 api.alsa.period-size
+```
+
+実測環境の USB CODEC は `period-size 512` + `headroom 512` = 1024 フレーム ≒ 21.3ms で、
+これは graph quantum とは別枠なので force-quantum では動きません。ここを削るには
+WirePlumber でデバイス個別に `api.alsa.headroom` を下げることになりますが、
+**永続設定**な上に USB デバイスでは xrun(プチノイズ)を招きやすいので、
+下げるなら少しずつ試してください。
 
 ### 下げると何が起きるか
 

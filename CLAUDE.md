@@ -213,7 +213,7 @@ S16LE / 48000Hz / 2ch 固定(`domain/audio_format.h`)。可変にする予定は
   以前 `pa_stream` にしたとき、Discord の画面共有に音が乗らなくなったことがある
   (2026-08-24 に利用者から共有された経験。原因は未特定)。低レイテンシ化のために
   API を変えたくなる場面があるが、**実際の画面共有で拾われるか確認するまでやらない**。
-  レイテンシは `--chunk-ms` と PipeWire の quantum でほぼ足りる(README 参照)。
+  レイテンシは `--chunk-ms` を詰めればほぼ足りる(README 参照)。
 - `pa_*` / ncurses の呼び出しは `adapters/` の中だけ。`domain/` の関数シグネチャに
   ライブラリの型を出さない。
 - **エラーを `std::cerr` に直接書かないこと。** TUI 表示中は画面が壊れる。
@@ -240,20 +240,27 @@ S16LE / 48000Hz / 2ch 固定(`domain/audio_format.h`)。可変にする予定は
 
 ## 次の一手(2026-08-24 時点)
 
-1. **PipeWire の quantum を下げた前後を実測する。** 現在 1024(21.3ms)。
-   `out` の 30ms 前後はこれが正体なので、ここが最後に残った下げ代。
+### 済: quantum を下げても縮まない(実測で決着)
 
-   ```bash
-   pw-metadata -n settings 0 clock.force-quantum 256   # 5.3ms
-   ./build/audio_capture_relay --no-tui --volume 0 --source 0 --low-latency   # 60〜90 秒
-   pw-metadata -n settings 0 clock.force-quantum 0     # 戻す
-   ```
+`clock.force-quantum 256` を強制した前後で、`--low-latency` の合計は 60ms、`out` は
+32〜35ms のまま変わらなかった。理由は **PipeWire が要求レイテンシに応じて quantum を
+自動で下げており、強制する前からすでに 256 だったから**(`pw-top -b -n 3` の QUANT 列で
+`AudioCaptureRelay` と sink がどちらも 256、`clock.force-quantum` は 0)。
 
-   **全アプリに効く設定**なので、実行前に「今流していいか」を確認すること
-   (通話中だと他の音が途切れる)。予想は合計 25〜35ms。
-2. その結果次第で `PACE_SLACK_CHUNKS` / `min_ring_frames` を CLI から触れるようにするか判断。
-   chunk 5ms では現状サーバ側の下限が支配的で、slack を 4 -> 2 に下げても縮まなかった
-   (実測 50ms で変化なし)。quantum を下げると話が変わる可能性がある。
+残る `out` の 30ms 前後は **sink の ALSA 側**(実測環境の USB CODEC は
+`period-size 512` + `headroom 512` = 1024 フレーム ≒ 21.3ms、`pw-dump` で確認できる)。
+graph quantum とは別枠なので force-quantum では動かない。**「quantum を下げれば縮む」と
+再提案しないこと。**
+
+### 残っている下げ代
+
+1. **WirePlumber でデバイス個別に `api.alsa.headroom` を下げる。** 実測環境では 512
+   (10.7ms)。ただし**永続設定**であり、USB デバイスでは xrun を招きやすい。
+   ツール側ではなく環境側の変更なので、やるなら本人の判断で。
+2. `PACE_SLACK_CHUNKS` / `min_ring_frames` を CLI から触れるようにするか(下記の未決事項)。
+   quantum で話が変わる可能性は消えたので、**判断材料はもう揃っている**。
+   chunk 5ms では slack を 4 -> 2 にしても実測 50ms のまま変わらなかった = ALSA 側が
+   支配的、というのが結論。触れるようにしても実利は薄い。
 3. `feat/low-latency`(`--low-latency` プリセット)は **main へ未マージ**。
 
 ---
@@ -261,8 +268,8 @@ S16LE / 48000Hz / 2ch 固定(`domain/audio_format.h`)。可変にする予定は
 ## 未決事項(勝手に決めない)
 
 - `PACE_SLACK_CHUNKS`(4)と `min_ring_frames`(2 チャンク)を CLI から触れるようにするか。
-  いまは定数。chunk 5ms では実測でサーバ側の下限(約 30ms)が支配的なので、
-  緩めても縮まなかった(2 に下げて実測 50ms、4 のままと同じ)。
+  いまは定数。chunk 5ms では実測でサーバ側の下限(約 30ms = sink の ALSA バッファ)が
+  支配的なので、緩めても縮まなかった(2 に下げて実測 50ms、4 のままと同じ)。
 
 - 出力先 sink は起動時にしか選べない。実行中に切り替えられるようにするか。
 - 打ち切り(3 秒)のあと、再接続を試みるようにするか。いまは終了するだけ。
