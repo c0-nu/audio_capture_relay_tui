@@ -49,3 +49,26 @@ TEST_CASE("parse_index は数字だけを受け付ける", "[text]") {
     CHECK_FALSE(parse_index("1a", out));
     CHECK_FALSE(parse_index("99999999999999999999999999", out)); // stoull が投げる
 }
+
+TEST_CASE("safe は C 文字列と null を安全に値化する", "[text]") {
+    CHECK(safe("pulse") == "pulse");
+    CHECK(safe(nullptr).empty());
+}
+
+TEST_CASE("parse_int は整数全体だけを受け付ける", "[text]") {
+    CHECK(parse_int("42") == 42);
+    CHECK(parse_int("-7") == -7);
+    CHECK_FALSE(parse_int("4ms").has_value());
+    CHECK_FALSE(parse_int("").has_value());
+    CHECK_FALSE(parse_int("99999999999999999999999999").has_value());
+}
+
+TEST_CASE("parse_float は有限の数値全体だけを受け付ける", "[text]") {
+    REQUIRE(parse_float("12.5").has_value());
+    CHECK(*parse_float("12.5") == 12.5f);
+    CHECK(parse_float("-0.25") == -0.25f);
+    CHECK_FALSE(parse_float("1.0x").has_value());
+    CHECK_FALSE(parse_float("").has_value());
+    CHECK_FALSE(parse_float("nan").has_value());
+    CHECK_FALSE(parse_float("inf").has_value());
+}

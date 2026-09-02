@@ -27,10 +27,6 @@ namespace acr {
         return storage_[(head_ + logical_index) % storage_.size()];
     }
 
-    const int16_t& PcmRing::sample_at_locked(std::size_t logical_index) const {
-        return storage_[(head_ + logical_index) % storage_.size()];
-    }
-
     PcmRing::PushResult PcmRing::push(const std::vector<int16_t>& samples, std::size_t max_frames) {
         std::lock_guard<std::mutex> lk(mutex_);
 

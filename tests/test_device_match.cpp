@@ -83,3 +83,14 @@ TEST_CASE("sort_devices はデフォルト先頭・INPUT が MONITOR より前",
     CHECK_FALSE(sources[1].is_monitor);    // Internal Mic
     CHECK(sources[2].is_monitor);          // Monitor of HDMI
 }
+
+TEST_CASE("sort_devices は同じ種別なら説明順", "[source]") {
+    std::vector<DeviceInfo> sources{
+        make("z", "Zulu"),
+        make("a", "Alpha"),
+    };
+
+    sort_devices(sources);
+    CHECK(sources[0].description == "Alpha");
+    CHECK(sources[1].description == "Zulu");
+}

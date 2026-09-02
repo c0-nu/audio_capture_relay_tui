@@ -51,7 +51,6 @@ namespace acr {
         std::size_t trim_locked(std::size_t max_frames);
         void ensure_capacity_locked(std::size_t required_samples);
         int16_t& sample_at_locked(std::size_t logical_index);
-        const int16_t& sample_at_locked(std::size_t logical_index) const;
 
         std::mutex mutex_;
         // capture/playback の各チャンクでヒープ確保しないよう、prepare で

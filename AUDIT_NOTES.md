@@ -12,9 +12,9 @@ compact 後に作業と判断経緯を引き継ぐためのメモ。
 - レイテンシ制御は「リング + サーバ側キュー」の合計を見る。
 - 排出時のクロスフェード、無音パディングの減衰・復帰ランプは壊さない。
 
-## 現在の未コミット変更
+## この監査で実施した変更
 
-作業開始時の worktree は clean だった。現在の変更は以下。
+作業開始時の worktree は clean だった。実施した変更は以下。
 
 1. PulseAudio デバイス列挙で、operation のキャンセルと callback 失敗をエラーとして扱う。
 2. `PcmRing` を `std::deque` から事前確保型の連続循環バッファへ変更。capture 開始前に 3 秒分 + 1 チャンク分を確保する。
@@ -27,7 +27,7 @@ compact 後に作業と判断経緯を引き継ぐためのメモ。
 9. プライミング中の write 失敗を記録し、終了時のブロッキング `drain` を廃止。
 10. relay 有効時の sink 0 件を起動時エラーにし、`--no-relay` では sink を要求しない。
 11. PulseAudio のデバイス列挙に 3 秒の接続・operation タイムアウトを追加。
-12. テストを 69 件から 75 件へ追加。
+12. テストを 69 件から 81 件へ追加。負方向の飽和、リング下限ガード、CLI 数値変換、デバイスの同順位ソートも検証。
 
 ## ドリフト平滑化の判断（対応済み）
 
@@ -110,8 +110,9 @@ relay 有効時は起動時に「出力 sink がない」と明示し、`--no-re
 現在の未コミット変更に対する結果:
 
 - 通常ビルド成功。`-Wall -Wextra -Wpedantic` で警告ゼロ。
-- domain テスト 75 / 75 成功。
-- ASan + UBSan 付きで 75 / 75 成功。実行環境が ptrace 下なので LeakSanitizer のみ `detect_leaks=0`。
+- domain テスト 81 / 81 成功。
+- ASan + UBSan 付きで 81 / 81 成功。実行環境が ptrace 下なので LeakSanitizer のみ `detect_leaks=0`。
+- gcov で domain の行カバレッジは約 99.5%。未実行と表示される 2 行は、戻り値破棄時の例外クリーンアップ経路。
 - `git diff --check` 成功。
 - GCC `-fanalyzer` は重大警告なし。
 - clang-tidy (`clang-analyzer-*`, `bugprone-*`, `performance-*`) の指摘は、主に明示変換可能な数値変換と `SharedState` の 36 byte padding。直接のメモリ破壊指摘はなし。

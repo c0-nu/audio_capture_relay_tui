@@ -97,6 +97,25 @@ TEST_CASE("飽和した補正量を次の水位まで持ち越さない", "[drif
     CHECK(crossed_below);
 }
 
+TEST_CASE("負方向の補正も 1 チャンクの上限内", "[drift]") {
+    constexpr int large_target = 1'000'000;
+    DriftController drift(large_target, CHUNK, 20, 0, large_target, 0);
+
+    const auto d = drift.update(3000, 0);
+    CHECK(d.consume_frames == CHUNK - max_drift_correction_frames(CHUNK));
+}
+
+TEST_CASE("リングの予備を割る排出は見送る", "[drift]") {
+    constexpr std::int64_t deep_out = 10'000;
+    constexpr std::int64_t guarded_ring = MIN_RING + CHUNK;
+    DriftController drift(TARGET, CHUNK, 20, MIN_RING, guarded_ring, deep_out);
+
+    const auto d = drift.update(guarded_ring, deep_out);
+    CHECK(d.raised_target);
+    CHECK(d.drift_ms > 0);             // 排出したい誤差はある
+    CHECK(d.consume_frames == CHUNK);  // だが予備を割るので見送う
+}
+
 TEST_CASE("恒常的に溜まっていれば多めに消費する", "[drift]") {
     auto drift = make();
     int corrected = 0;
