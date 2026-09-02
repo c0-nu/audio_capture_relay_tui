@@ -165,7 +165,12 @@ namespace acr {
             return row;
         }
 
-        void draw_waveform(SharedState& st, int rows, int cols, int row) {
+        void draw_waveform(SharedState& st,
+                           int rows,
+                           int cols,
+                           int row,
+                           std::vector<WaveBucket>& buckets,
+                           WaveformRenderBuffer& render_buffer) {
             if (!st.waveform_enabled.load()) {
                 draw_line(row, cols, "Waveform hidden. Press w to show.");
                 return;
@@ -178,15 +183,15 @@ namespace acr {
                       + waveform_style_name(style) + "]");
             if (has_colors()) attroff(COLOR_PAIR(COLOR_INFO));
 
-            std::vector<WaveBucket> buckets = st.wave.snapshot();
+            st.wave.snapshot(buckets);
 
             int wave_top = row + 1;
             int wave_rows = std::max(1, rows - wave_top - 2);
             int wave_cols = std::max(1, cols - 1);
 
-            auto lines = make_braille_waveform(buckets, wave_cols, wave_rows, style);
-            for (int i = 0; i < static_cast<int>(lines.size()) && wave_top + i < rows - 1; ++i) {
-                mvaddstr(wave_top + i, 0, lines[i].c_str());
+            render_braille_waveform(buckets, wave_cols, wave_rows, style, render_buffer);
+            for (int i = 0; i < static_cast<int>(render_buffer.lines.size()) && wave_top + i < rows - 1; ++i) {
+                mvaddstr(wave_top + i, 0, render_buffer.lines[static_cast<std::size_t>(i)].c_str());
             }
         }
 
@@ -194,6 +199,10 @@ namespace acr {
 
     void run_tui(SharedState& st, const RelayConfig& cfg) {
         init_screen();
+
+        // 20fps の描画ループでヒープ確保を繰り返さないよう、呼び出し間で保持する。
+        std::vector<WaveBucket> wave_buckets;
+        WaveformRenderBuffer wave_render_buffer;
 
         while (st.is_running()) {
             handle_keys(st);
@@ -214,7 +223,7 @@ namespace acr {
             ++row; // 空行
             row = draw_levels(st, cfg, cols, row);
             row = draw_latency(st, cfg, cols, row);
-            draw_waveform(st, rows, cols, row);
+            draw_waveform(st, rows, cols, row, wave_buckets, wave_render_buffer);
 
             draw_line(rows - 1, cols, st.relay_enabled
                       ? "q quit | +/- volume | m mute | w waveform | s style | p pause"

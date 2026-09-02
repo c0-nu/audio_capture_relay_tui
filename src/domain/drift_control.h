@@ -42,8 +42,16 @@
 // 実際に耳へ届くまでの時間と一致する。
 namespace acr {
 
-    constexpr double DRIFT_SMOOTHING_ALPHA = 1.0 / 64.0; // ~1.3s time constant at 20ms chunks
+    // 平滑化したいのは実時間のノイズではなく、capture/playback の
+    // チャンク単位のノコギリ波なので、チャンク長によらず約 64 チャンクで平滑化する。
+    constexpr double DRIFT_SMOOTHING_ALPHA = 1.0 / 64.0;
     constexpr double DRIFT_CORRECTION_SECONDS = 4.0;     // time to fully absorb the current smoothed error
+
+    // 再生側の事前確保と制御器の上限を同じ計算にする。
+    constexpr int max_drift_correction_frames(int chunk_frames) {
+        const int proportional_limit = chunk_frames / 20; // 1 チャンクの約 5%
+        return proportional_limit > 8 ? proportional_limit : 8;
+    }
 
     // 合計レイテンシから「今回いくつフレームを消費するか」を決める。
     // 状態は平滑値と補正の未払い分だけ。I/O には触れない。

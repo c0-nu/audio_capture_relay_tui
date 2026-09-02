@@ -13,6 +13,7 @@
 #include "domain/shared_state.h"
 
 #include <iostream>
+#include <optional>
 #include <thread>
 
 int main(int argc, char** argv) {
@@ -42,7 +43,10 @@ int main(int argc, char** argv) {
     }
 
     bool sink_failed = false;
-    auto sink = acr::choose_sink(lister.sinks(), opt.sink_arg, sink_failed);
+    std::optional<acr::DeviceInfo> sink;
+    if (opt.relay_enabled) {
+        sink = acr::choose_sink(lister.sinks(), opt.sink_arg, sink_failed);
+    }
     if (sink_failed) {
         std::cerr << "\nUse --list to inspect available sinks.\n";
         return 1;

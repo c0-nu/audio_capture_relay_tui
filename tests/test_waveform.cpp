@@ -115,6 +115,12 @@ TEST_CASE("WaveHistory は容量を超えたら古い方から捨てる", "[wave
     CHECK(s.front().max == 0.7f);
 }
 
+TEST_CASE("WaveHistory は容量 0 でも追加できる", "[wave]") {
+    WaveHistory h(2, 0);
+    h.append({-1.0f, 1.0f, 0.5f, 0.25f});
+    CHECK(h.snapshot().empty());
+}
+
 TEST_CASE("スタイル名の相互変換", "[wave]") {
     CHECK(std::string(waveform_style_name(WaveformStyle::Envelope)) == "envelope");
     CHECK(std::string(waveform_style_name(WaveformStyle::Line)) == "line");
@@ -158,4 +164,38 @@ TEST_CASE("線表示は隣の列と繋がる", "[wave]") {
 TEST_CASE("既定はエンベロープ", "[wave]") {
     std::vector<WaveBucket> buckets(300, WaveBucket{-1.0f, 1.0f, 0.0f});
     CHECK(make_braille_waveform(buckets, 20, 4) == make_braille_waveform(buckets, 20, 4, WaveformStyle::Envelope));
+}
+
+TEST_CASE("描画バッファは同じサイズで使い回せる", "[wave]") {
+    WaveformRenderBuffer buffer;
+    auto buckets = flat(1500, 0.25f);
+
+    render_braille_waveform(buckets, 80, 8, WaveformStyle::Envelope, buffer);
+    const auto cell_capacity = buffer.cells.capacity();
+    const auto line_capacity = buffer.lines.capacity();
+    std::vector<std::size_t> string_capacities;
+    for (const auto& line : buffer.lines) string_capacities.push_back(line.capacity());
+
+    render_braille_waveform(buckets, 80, 8, WaveformStyle::Line, buffer);
+    CHECK(buffer.cells.capacity() == cell_capacity);
+    CHECK(buffer.lines.capacity() == line_capacity);
+    REQUIRE(buffer.lines.size() == string_capacities.size());
+    for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
+        CHECK(buffer.lines[i].capacity() == string_capacities[i]);
+    }
+}
+
+TEST_CASE("波形履歴は呼び出し側のバッファへスナップショットできる", "[wave]") {
+    WaveHistory history(2, 10);
+    history.append({-1.0f, 1.0f, 0.5f, 0.25f});
+
+    std::vector<WaveBucket> snapshot;
+    history.snapshot(snapshot);
+    REQUIRE(snapshot.size() == 2);
+    CHECK(snapshot[0].min == -1.0f);
+    CHECK(snapshot[0].max == 1.0f);
+
+    const auto capacity = snapshot.capacity();
+    history.snapshot(snapshot);
+    CHECK(snapshot.capacity() == capacity);
 }

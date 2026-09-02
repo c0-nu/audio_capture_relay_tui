@@ -2,6 +2,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdlib>
 
 using namespace acr;
@@ -49,6 +52,49 @@ TEST_CASE("チャンク単位のノコギリには反応しない", "[drift]") {
     CHECK(nudges <= 3);
     // 10 秒でならして数フレーム(= 0.1ms 未満)しか動かない。
     CHECK(std::abs(net_correction) <= 3);
+}
+
+TEST_CASE("平滑化はチャンク長によらず 64 チャンク単位", "[drift]") {
+    // 除きたいのは capture/playback がチャンクで授受するために出る
+    // ノコギリ波。実時間の時定数ではなく、どの設定でも同じ 1/64 を使う。
+    for (const auto [chunk_ms, chunk_frames] :
+         std::array<std::array<int, 2>, 3>{{{{5, 240}}, {{20, 960}}, {{200, 9600}}}}) {
+        DriftController drift(TARGET, chunk_frames, chunk_ms, 0, TARGET, 0);
+        const int step = chunk_frames / 2;
+        const auto first = drift.update(TARGET + step, 0);
+        const auto expected = TARGET + static_cast<std::int64_t>(std::lround(step * DRIFT_SMOOTHING_ALPHA));
+        CHECK(first.smoothed_total_frames == expected);
+
+        std::int64_t max_smoothed_error = 0;
+        for (int i = 0; i < 500; ++i) {
+            const auto d = drift.update(TARGET + ((i % 2) ? step : -step), 0);
+            max_smoothed_error = std::max(max_smoothed_error,
+                                          std::abs(d.smoothed_total_frames - TARGET));
+        }
+        CHECK(max_smoothed_error <= step / 50 + 1); // 生の振幅の 2% 以下
+    }
+}
+
+TEST_CASE("飽和した補正量を次の水位まで持ち越さない", "[drift]") {
+    auto drift = make();
+
+    // 一時的な大渋滞で上限に張り付かせる。
+    for (int i = 0; i < 200; ++i) {
+        CHECK(drift.update(1'000'000, 0).consume_frames <=
+              CHUNK + max_drift_correction_frames(CHUNK));
+    }
+
+    // 平滑値が目標を下回ったら、古い正方向の debt で排出し続けない。
+    bool crossed_below = false;
+    for (int i = 0; i < 2000; ++i) {
+        const auto d = drift.update(3000, 0);
+        if (d.drift_ms < 0) {
+            crossed_below = true;
+            CHECK(d.consume_frames <= CHUNK);
+            break;
+        }
+    }
+    CHECK(crossed_below);
 }
 
 TEST_CASE("恒常的に溜まっていれば多めに消費する", "[drift]") {

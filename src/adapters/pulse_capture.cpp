@@ -64,6 +64,11 @@ namespace acr {
         ChunkAnalysis analysis; // 毎チャンク作り直さず使い回す
         FailureWindow failures(FAILURE_LIMIT);
 
+        if (st.relay_enabled) {
+            // ここはホットパスの外。capture 中の push でアロケータを呼ばない。
+            st.ring.prepare(MAX_RING_FRAMES, static_cast<std::size_t>(chunk_frames));
+        }
+
         while (st.is_running()) {
             if (pa_simple_read(rec, input.data(), input.size() * sizeof(int16_t), &error) < 0) {
                 st.errors.report(std::string("pa_simple_read failed: ") + pa_strerror(error));

@@ -119,3 +119,29 @@ TEST_CASE("pop は渡したバッファを使い回す", "[ring]") {
     CHECK(buf.front() == 0);
     CHECK(buf.back() == 3);
 }
+
+TEST_CASE("事前確保した循環バッファの端をまたいでも順序を保つ", "[ring]") {
+    PcmRing ring;
+    ring.prepare(5, 3);
+
+    ring.push(ramp(5), 5);
+    auto first = take(ring, 4);
+    REQUIRE(first.frames == 4);
+    CHECK(first.samples.front() == 0);
+    CHECK(first.samples.back() == 3);
+
+    ring.push(ramp(3, 100), 5);
+    auto middle = take(ring, 2);
+    REQUIRE(middle.frames == 2);
+    CHECK(middle.samples[0] == 4);
+    CHECK(middle.samples[2] == 100);
+
+    ring.push(ramp(3, 200), 5); // 論理データが物理バッファの末尾と先頭にまたがる
+    auto rest = take(ring, 5);
+    REQUIRE(rest.frames == 5);
+    CHECK(rest.samples[0] == 101);
+    CHECK(rest.samples[2] == 102);
+    CHECK(rest.samples[4] == 200);
+    CHECK(rest.samples[6] == 201);
+    CHECK(rest.samples[8] == 202);
+}

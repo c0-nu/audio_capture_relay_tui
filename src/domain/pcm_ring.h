@@ -3,7 +3,6 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <mutex>
 #include <vector>
 
@@ -24,6 +23,10 @@ namespace acr {
             std::size_t frames = 0; // 実際に取れたフレーム数(要求より少ないことがある)
             bool underrun = false;  // 要求フレーム数に届かなかった
         };
+
+        // ホットパスに入る前に、上限と 1 回の push 分の連続領域を確保する。
+        // push は未準備でも動くが、その場合は必要時にこの中で確保する。
+        void prepare(std::size_t max_frames, std::size_t max_push_frames);
 
         // samples を末尾に積む。max_frames を超えたら古い方を落とす。
         // 落とす際は、落とす範囲の末尾と残す範囲の先頭をクロスフェードして、
@@ -46,9 +49,16 @@ namespace acr {
     private:
         // mutex_ を取った状態で呼ぶこと。落としたフレーム数を返す。
         std::size_t trim_locked(std::size_t max_frames);
+        void ensure_capacity_locked(std::size_t required_samples);
+        int16_t& sample_at_locked(std::size_t logical_index);
+        const int16_t& sample_at_locked(std::size_t logical_index) const;
 
         std::mutex mutex_;
-        std::deque<int16_t> data_;
+        // capture/playback の各チャンクでヒープ確保しないよう、prepare で
+        // 一度だけ確保し、head_ と size_samples_ で循環バッファとして使う。
+        std::vector<int16_t> storage_;
+        std::size_t head_ = 0;
+        std::size_t size_samples_ = 0;
         std::atomic<std::size_t> frames_buffered_{0};
     };
 

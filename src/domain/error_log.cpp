@@ -3,10 +3,10 @@
 namespace acr {
 
     void ErrorLog::report(const std::string& message) {
-        {
-            std::lock_guard<std::mutex> lk(mutex_);
-            message_ = message;
-        }
+        std::lock_guard<std::mutex> lk(mutex_);
+        message_ = message;
+        // snapshot が新しい本文と古い件数の組み合わせを見ないよう、
+        // 両方を同じクリティカルセクションで更新する。
         count_.fetch_add(1);
     }
 

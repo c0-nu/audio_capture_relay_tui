@@ -45,6 +45,11 @@ namespace acr {
                                           const std::string& sink_arg,
                                           bool& failed) {
         failed = false;
+        if (sinks.empty()) {
+            std::cerr << "No output sinks available.\n";
+            failed = true;
+            return std::nullopt;
+        }
         if (sink_arg.empty()) return std::nullopt; // 既定の sink に任せる
 
         DeviceMatch match = match_device(sinks, sink_arg);

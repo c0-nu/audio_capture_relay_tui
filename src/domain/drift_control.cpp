@@ -46,10 +46,22 @@ namespace acr {
         // drift rate.
         correction_debt_ += smoothed_error / chunks_for_full_correction_;
 
-        const int max_correction_frames = std::max(8, chunk_frames_ / 20); // ~5% of a chunk
-        int correction = static_cast<int>(std::trunc(correction_debt_));
-        correction = std::clamp(correction, -max_correction_frames, max_correction_frames);
-        correction_debt_ -= correction;
+        const int max_correction_frames = max_drift_correction_frames(chunk_frames_);
+        const double whole_debt = std::trunc(correction_debt_);
+        int correction = 0;
+        if (whole_debt > static_cast<double>(max_correction_frames)) {
+            correction = max_correction_frames;
+            // 上限で払えなかった量を積み残すと、一時的な水位変化が収まった後も
+            // 古い方向の補正を長時間出し続ける。毎回現在の誤差を再計算するため、
+            // 飽和時は 1 フレーム未満の端数だけを残す。
+            correction_debt_ -= whole_debt;
+        } else if (whole_debt < -static_cast<double>(max_correction_frames)) {
+            correction = -max_correction_frames;
+            correction_debt_ -= whole_debt;
+        } else {
+            correction = static_cast<int>(whole_debt);
+            correction_debt_ -= whole_debt;
+        }
 
         Decision d;
         d.raised_target = effective_target > static_cast<double>(target_total_frames_) + 0.5;

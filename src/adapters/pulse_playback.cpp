@@ -73,8 +73,11 @@ namespace acr {
 
         std::vector<int16_t> output(static_cast<std::size_t>(chunk_frames) * CHANNELS);
         std::vector<int16_t> popped_buffer; // 毎チャンク確保し直さないよう使い回す
-        popped_buffer.reserve(static_cast<std::size_t>(chunk_frames + 64) * CHANNELS);
+        popped_buffer.reserve(static_cast<std::size_t>(
+            chunk_frames + max_drift_correction_frames(chunk_frames)) * CHANNELS);
         PaddingState pad; // 枯れたときの埋め方(チャンクをまたいで持ち越す)
+
+        FailureWindow failures(FAILURE_LIMIT);
 
         // サーバ側キューの滞留。取得に失敗したら直前の値を使う(毎チャンク聞くので
         // 1 回落ちても次で戻る。ここで stderr に吐くと TUI が壊れる)。
@@ -130,7 +133,11 @@ namespace acr {
         {
             const std::vector<int16_t> silence(static_cast<std::size_t>(chunk_frames) * CHANNELS, 0);
             while (st.is_running() && st.ring.frames_buffered() < static_cast<std::size_t>(ring_start_frames)) {
-                if (pa_simple_write(play, silence.data(), silence.size() * sizeof(int16_t), &error) < 0) break;
+                if (pa_simple_write(play, silence.data(), silence.size() * sizeof(int16_t), &error) < 0) {
+                    st.errors.report(std::string("pa_simple_write(priming) failed: ") + pa_strerror(error));
+                    failures.record_failure(std::chrono::steady_clock::now());
+                    break;
+                }
                 written_frames += static_cast<std::uint64_t>(chunk_frames);
                 pace();
             }
@@ -138,8 +145,6 @@ namespace acr {
 
         // 貯まりすぎた分は捨てる(中継開始前の音なので落としてよい)。
         st.ring.trim(static_cast<std::size_t>(ring_start_frames));
-
-        FailureWindow failures(FAILURE_LIMIT);
 
         DriftController drift(target_frames, chunk_frames, cfg.chunk_ms, cfg.min_ring_frames(),
                               static_cast<std::int64_t>(st.ring.frames_buffered()), query_downstream());
@@ -174,7 +179,8 @@ namespace acr {
             pace();
         }
 
-        pa_simple_drain(play, &error);
+        // 終了時にサーバ側キューの再生完了を待つ必要はない。drain は接続異常時に
+        // 停止を長引かせるため、ここでは残りを捨てて即時に閉じる。
         pa_simple_free(play);
     }
 

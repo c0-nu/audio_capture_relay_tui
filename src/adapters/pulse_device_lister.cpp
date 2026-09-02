@@ -5,9 +5,15 @@
 
 #include <pulse/pulseaudio.h>
 
+#include <chrono>
+#include <thread>
+
 namespace acr {
 
     namespace {
+
+        constexpr auto QUERY_TIMEOUT = std::chrono::seconds(3);
+        constexpr auto QUERY_POLL_INTERVAL = std::chrono::milliseconds(1);
 
         // 1 回のクエリで使う PulseAudio のメインループとコンテキスト。
         // デストラクタで必ず片付ける。
@@ -35,8 +41,9 @@ namespace acr {
                 }
 
                 int error = 0;
+                const auto deadline = std::chrono::steady_clock::now() + QUERY_TIMEOUT;
                 while (true) {
-                    if (pa_mainloop_iterate(mainloop_, 1, &error) < 0) {
+                    if (pa_mainloop_iterate(mainloop_, 0, &error) < 0) {
                         error_message = std::string("pa_mainloop_iterate failed: ") + pa_strerror(error);
                         return false;
                     }
@@ -47,6 +54,11 @@ namespace acr {
                         error_message = std::string("PulseAudio context failed: ") + pa_strerror(pa_context_errno(context_));
                         return false;
                     }
+                    if (std::chrono::steady_clock::now() >= deadline) {
+                        error_message = "PulseAudio connection timed out";
+                        return false;
+                    }
+                    std::this_thread::sleep_for(QUERY_POLL_INTERVAL);
                 }
             }
 
@@ -59,15 +71,32 @@ namespace acr {
                 }
 
                 int error = 0;
-                while (pa_operation_get_state(op) == PA_OPERATION_RUNNING) {
-                    if (pa_mainloop_iterate(mainloop_, 1, &error) < 0) {
+                const auto deadline = std::chrono::steady_clock::now() + QUERY_TIMEOUT;
+                pa_operation_state_t state = pa_operation_get_state(op);
+                while (state == PA_OPERATION_RUNNING) {
+                    if (pa_mainloop_iterate(mainloop_, 0, &error) < 0) {
                         error_message = std::string("pa_mainloop_iterate failed: ") + pa_strerror(error);
                         pa_operation_unref(op);
                         return false;
                     }
+                    state = pa_operation_get_state(op);
+                    if (state == PA_OPERATION_RUNNING) {
+                        if (std::chrono::steady_clock::now() >= deadline) {
+                            error_message = "PulseAudio operation timed out";
+                            pa_operation_cancel(op);
+                            pa_operation_unref(op);
+                            return false;
+                        }
+                        std::this_thread::sleep_for(QUERY_POLL_INTERVAL);
+                    }
                 }
 
                 pa_operation_unref(op);
+                if (state != PA_OPERATION_DONE) {
+                    error_message = std::string("PulseAudio operation was cancelled: ")
+                                  + pa_strerror(pa_context_errno(context_));
+                    return false;
+                }
                 return true;
             }
 
@@ -98,17 +127,25 @@ namespace acr {
         std::vector<DeviceInfo>* sinks = nullptr;
         std::string* default_source = nullptr;
         std::string* default_sink = nullptr;
+        bool callback_failed = false;
 
         static void server_info_cb(pa_context*, const pa_server_info* info, void* userdata) {
             auto* self = static_cast<Impl*>(userdata);
-            if (!info) return;
+            if (!info) {
+                self->callback_failed = true;
+                return;
+            }
             if (info->default_source_name) *self->default_source = info->default_source_name;
             if (info->default_sink_name) *self->default_sink = info->default_sink_name;
         }
 
         static void sink_info_cb(pa_context*, const pa_sink_info* info, int eol, void* userdata) {
-            if (eol > 0 || !info) return;
             auto* self = static_cast<Impl*>(userdata);
+            if (eol < 0) {
+                self->callback_failed = true;
+                return;
+            }
+            if (eol > 0 || !info) return;
 
             DeviceInfo s;
             s.index = info->index;
@@ -118,8 +155,12 @@ namespace acr {
         }
 
         static void source_info_cb(pa_context*, const pa_source_info* info, int eol, void* userdata) {
-            if (eol > 0 || !info) return;
             auto* self = static_cast<Impl*>(userdata);
+            if (eol < 0) {
+                self->callback_failed = true;
+                return;
+            }
+            if (eol > 0 || !info) return;
 
             DeviceInfo s;
             s.index = info->index;
@@ -142,15 +183,30 @@ namespace acr {
 
         Impl out{&sources_, &sinks_, &default_source_, &default_sink_};
 
-        if (!session.wait_operation(pa_context_get_server_info(session.context(), &Impl::server_info_cb, &out), error_message)) {
+        auto operation_succeeded = [&](pa_operation* operation, const char* name) {
+            if (!session.wait_operation(operation, error_message)) return false;
+            if (!out.callback_failed) return true;
+
+            error_message = std::string("PulseAudio ") + name + " callback failed: "
+                          + pa_strerror(pa_context_errno(session.context()));
+            return false;
+        };
+
+        out.callback_failed = false;
+        if (!operation_succeeded(pa_context_get_server_info(session.context(), &Impl::server_info_cb, &out),
+                                 "server-info")) {
             return false;
         }
 
-        if (!session.wait_operation(pa_context_get_source_info_list(session.context(), &Impl::source_info_cb, &out), error_message)) {
+        out.callback_failed = false;
+        if (!operation_succeeded(pa_context_get_source_info_list(session.context(), &Impl::source_info_cb, &out),
+                                 "source-list")) {
             return false;
         }
 
-        if (!session.wait_operation(pa_context_get_sink_info_list(session.context(), &Impl::sink_info_cb, &out), error_message)) {
+        out.callback_failed = false;
+        if (!operation_succeeded(pa_context_get_sink_info_list(session.context(), &Impl::sink_info_cb, &out),
+                                 "sink-list")) {
             return false;
         }
 

@@ -18,16 +18,32 @@ namespace acr {
             partial_.last = v;
 
             if (++partial_count_ >= bucket_samples_) {
-                buckets_.push_back(partial_);
                 partial_count_ = 0;
-                if (buckets_.size() > capacity_) buckets_.pop_front();
+                if (buckets_.empty()) continue;
+
+                const std::size_t tail = (head_ + size_) % buckets_.size();
+                buckets_[tail] = partial_;
+                if (size_ < buckets_.size()) {
+                    ++size_;
+                } else {
+                    head_ = (head_ + 1) % buckets_.size();
+                }
             }
         }
     }
 
-    std::vector<WaveBucket> WaveHistory::snapshot() const {
+    void WaveHistory::snapshot(std::vector<WaveBucket>& out) const {
         std::lock_guard<std::mutex> lk(mutex_);
-        return std::vector<WaveBucket>(buckets_.begin(), buckets_.end());
+        out.resize(size_);
+        for (std::size_t i = 0; i < size_; ++i) {
+            out[i] = buckets_[(head_ + i) % buckets_.size()];
+        }
+    }
+
+    std::vector<WaveBucket> WaveHistory::snapshot() const {
+        std::vector<WaveBucket> out;
+        snapshot(out);
+        return out;
     }
 
 } // namespace acr

@@ -43,17 +43,28 @@ namespace acr {
         return std::nullopt;
     }
 
-    std::vector<std::string> make_braille_waveform(const std::vector<WaveBucket>& buckets,
-                                                   int cols,
-                                                   int rows,
-                                                   WaveformStyle style) {
-        if (cols <= 0 || rows <= 0) return {};
-        if (buckets.empty()) return std::vector<std::string>(rows, std::string());
+    void render_braille_waveform(const std::vector<WaveBucket>& buckets,
+                                 int cols,
+                                 int rows,
+                                 WaveformStyle style,
+                                 WaveformRenderBuffer& out) {
+        if (cols <= 0 || rows <= 0) {
+            out.cells.clear();
+            out.lines.clear();
+            return;
+        }
+
+        out.lines.resize(static_cast<std::size_t>(rows));
+        if (buckets.empty()) {
+            out.cells.clear();
+            for (auto& line : out.lines) line.clear();
+            return;
+        }
 
         const int pixel_w = cols * 2;
         const int pixel_h = rows * 4;
 
-        std::vector<std::vector<unsigned char>> cells(rows, std::vector<unsigned char>(cols, 0));
+        out.cells.assign(static_cast<std::size_t>(rows) * static_cast<std::size_t>(cols), 0);
 
         // 振幅 -> 画面 y。+1.0 が上端、-1.0 が下端。
         auto y_of = [&](float v) {
@@ -100,7 +111,8 @@ namespace acr {
                 int cell_x = x / 2;
                 int cell_y = y / 4;
                 if (cell_x >= 0 && cell_x < cols && cell_y >= 0 && cell_y < rows) {
-                    cells[cell_y][cell_x] |= DOT_MAP[y % 4][x % 2];
+                    out.cells[static_cast<std::size_t>(cell_y) * static_cast<std::size_t>(cols)
+                              + static_cast<std::size_t>(cell_x)] |= DOT_MAP[y % 4][x % 2];
                 }
             }
 
@@ -108,24 +120,29 @@ namespace acr {
             prev_bottom = bottom;
         }
 
-        std::vector<std::string> lines;
-        lines.reserve(rows);
-
         for (int y = 0; y < rows; ++y) {
-            std::string line;
+            std::string& line = out.lines[static_cast<std::size_t>(y)];
+            line.clear();
             line.reserve(static_cast<std::size_t>(cols) * 3);
 
             for (int x = 0; x < cols; ++x) {
-                std::uint32_t code = 0x2800u + cells[y][x];
+                std::uint32_t code = 0x2800u
+                                   + out.cells[static_cast<std::size_t>(y) * static_cast<std::size_t>(cols)
+                                               + static_cast<std::size_t>(x)];
                 line.push_back(static_cast<char>(0xE0 | ((code >> 12) & 0x0F)));
                 line.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
                 line.push_back(static_cast<char>(0x80 | (code & 0x3F)));
             }
-
-            lines.push_back(std::move(line));
         }
+    }
 
-        return lines;
+    std::vector<std::string> make_braille_waveform(const std::vector<WaveBucket>& buckets,
+                                                   int cols,
+                                                   int rows,
+                                                   WaveformStyle style) {
+        WaveformRenderBuffer out;
+        render_braille_waveform(buckets, cols, rows, style, out);
+        return std::move(out.lines);
     }
 
     std::string meter_bar(float value, int width) {
